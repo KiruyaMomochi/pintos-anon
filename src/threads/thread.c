@@ -1,4 +1,5 @@
 #include "threads/thread.h"
+#include "devices/timer.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
@@ -68,6 +69,7 @@ static void init_thread (struct thread *, const char *name, int priority);
 static bool is_thread (struct thread *) UNUSED;
 static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
+static void schedule_to (struct thread *);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
@@ -198,6 +200,14 @@ thread_create (const char *name, int priority, thread_func *function,
   sf->eip = switch_entry;
   sf->ebp = 0;
 
+  /* If the new thread has larger effective priority, switch to this thread
+     immediately. */
+  if (t->effective_priority > thread_current ()->effective_priority)
+    {
+      thread_yield_to (t);
+      return tid;
+    }
+
   /* Add to run queue. */
   thread_unblock (t);
 
@@ -314,6 +324,24 @@ thread_yield (void)
   intr_set_level (old_level);
 }
 
+/* Yields CPU and switch to thread T. */
+void
+thread_yield_to (struct thread *t)
+{
+  struct thread *cur = thread_current ();
+  enum intr_level old_level;
+
+  ASSERT (is_thread (t));
+  ASSERT (!intr_context ());
+
+  old_level = intr_disable ();
+  if (cur != idle_thread)
+    list_push_back (&ready_list, &cur->elem);
+  cur->status = THREAD_READY;
+  schedule_to (t);
+  intr_set_level (old_level);
+}
+
 /* Invoke function 'func' on all threads, passing along 'aux'.
    This function must be called with interrupts off. */
 void
@@ -331,18 +359,91 @@ thread_foreach (thread_action_func *func, void *aux)
     }
 }
 
+/* Recalculate the current thread's effective priority */
+void
+thread_recalculate_effective_priority ()
+{
+  struct thread *t = thread_current ();
+  t->effective_priority = t->priority;
+
+  struct list_elem *e;
+  for (e = list_begin (&t->acquired_locks); e != list_end (&t->acquired_locks);
+       e = list_next (e))
+    {
+      struct lock *lock = list_entry (e, struct lock, elem);
+      if (lock->priority > t->effective_priority)
+        t->effective_priority = lock->priority;
+    }
+}
+
+/* Donates the thread T's priority to whom it is waiting. */
+void
+thread_donate_priority (struct thread *t)
+{
+  ASSERT (t->waiting_lock != NULL);
+  ASSERT (t->waiting_lock->holder != NULL);
+
+  /* Find the holder of waiting lock */
+  struct thread *holder = t->waiting_lock->holder;
+
+  /* Donate priority to waiting lock */
+  int priority = t->effective_priority;
+  t->waiting_lock->priority = priority;
+
+  /* Update effective priority of lock holder */
+  if (holder->effective_priority < priority)
+    holder->effective_priority = priority;
+
+  /* Recursively donate priority of waiting lock's holder */
+  if (holder->waiting_lock != NULL)
+    thread_donate_priority (holder);
+}
+
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority)
 {
-  thread_current ()->priority = new_priority;
+  struct thread *t = thread_current ();
+
+  int old_priority = thread_get_priority ();
+  t->priority = new_priority;
+  thread_recalculate_effective_priority ();
+
+  /* Yield CPU if new priority is less than before */
+  if (thread_get_priority () < old_priority)
+    thread_yield ();
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void)
 {
-  return thread_current ()->priority;
+  return thread_current ()->effective_priority;
+}
+
+/* Sets the current thread's waiting lock to LOCK.
+   Requires that there is no other waiting lock. */
+void
+thread_set_waiting_lock (struct lock *lock)
+{
+  struct thread *t = thread_current ();
+  ASSERT (t->waiting_lock == NULL);
+
+  t->waiting_lock = lock;
+}
+
+/* Clear the waiting lock of the current thread, and return it. */
+struct lock *
+thread_clear_waiting_lock ()
+{
+  struct thread *t = thread_current ();
+  struct lock *lock = t->waiting_lock;
+  ASSERT (lock != NULL);
+
+  t->waiting_lock = NULL;
+  return lock;
+}
+
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -464,6 +565,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
 
+  list_init (&t->acquired_locks);
+  t->waiting_lock = NULL;
+  t->effective_priority = t->priority;
+
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
@@ -482,6 +587,17 @@ alloc_frame (struct thread *t, size_t size)
   return t->stack;
 }
 
+/* Compare two threads, returns true if LHS has a lower priority than RHS. */
+bool
+thread_priority_less (const struct list_elem *lhs, const struct list_elem *rhs,
+                      void *aux UNUSED)
+{
+  const struct thread *lt = list_entry (lhs, struct thread, elem);
+  const struct thread *rt = list_entry (rhs, struct thread, elem);
+
+  return lt->effective_priority < rt->effective_priority;
+}
+
 /* Chooses and returns the next thread to be scheduled.  Should
    return a thread from the run queue, unless the run queue is
    empty.  (If the running thread can continue running, then it
@@ -492,8 +608,11 @@ next_thread_to_run (void)
 {
   if (list_empty (&ready_list))
     return idle_thread;
-  else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+
+  struct list_elem *e = list_max (&ready_list, thread_priority_less, NULL);
+  struct thread *t = list_entry (e, struct thread, elem);
+  list_remove (&t->elem);
+  return t;
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -554,6 +673,25 @@ schedule (void)
 {
   struct thread *cur = running_thread ();
   struct thread *next = next_thread_to_run ();
+  struct thread *prev = NULL;
+
+  ASSERT (intr_get_level () == INTR_OFF);
+  ASSERT (cur->status != THREAD_RUNNING);
+  ASSERT (is_thread (next));
+
+  if (cur != next)
+    prev = switch_threads (cur, next);
+  thread_schedule_tail (prev);
+}
+
+/* Switch to thread T. */
+static void
+schedule_to (struct thread *t)
+{
+  ASSERT (is_thread (t));
+
+  struct thread *cur = running_thread ();
+  struct thread *next = t;
   struct thread *prev = NULL;
 
   ASSERT (intr_get_level () == INTR_OFF);
