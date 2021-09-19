@@ -1,0 +1,7 @@
+---
+# We'll use defaults from the GNU style
+BasedOnStyle: GNU
+---
+Language: Cpp
+---
+
