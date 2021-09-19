@@ -611,17 +611,14 @@ thread_recalculate_recent_cpu (struct thread *t)
 {
   ASSERT (thread_mlfqs);
   ASSERT (t != NULL);
-  // ASSERT (t != idle_thread);
   ASSERT (timer_ticks () % TIMER_FREQ == 0);
 
   fixed_t recent_cpu = t->recent_cpu;
   int nice = t->nice;
 
-  // (2 * load_avg) / (2 * load_avg + 1)
   fixed_t load_avg_2 = fixed_mul_int (load_avg, 2);
   fixed_t coeffient = fixed_div (load_avg_2, fixed_add_int (load_avg_2, 1));
 
-  // coeffient * recent_cpu + nice
   fixed_t new_recent_cpu
       = fixed_add_int (fixed_mul (coeffient, recent_cpu), nice);
   t->recent_cpu = new_recent_cpu;
