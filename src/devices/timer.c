@@ -103,8 +103,9 @@ sleeping_threads_tick (void)
   old_level = intr_disable ();
 
   struct list_elem *e = list_begin (&sleeping_threads);
+  struct list_elem *end = list_end (&sleeping_threads);
 
-  while (e != list_end (&sleeping_threads))
+  while (e != end)
     {
       struct sleeping_thread *sleeping_thread
           = list_entry (e, struct sleeping_thread, elem);
@@ -116,7 +117,7 @@ sleeping_threads_tick (void)
       if (timer_ticks () >= sleeping_thread->wake_time)
         {
           /* Remove thread from list of sleeping threads. */
-          e = list_remove (&sleeping_thread->elem);
+          list_remove (&sleeping_thread->elem);
           /* Wake up thread. */
           sema_up (&sleeping_thread->semaphore);
         }

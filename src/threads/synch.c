@@ -211,8 +211,11 @@ lock_acquire (struct lock *lock)
   struct thread *cur = thread_current ();
   thread_set_waiting_lock (lock);
 
-  if (lock->holder != NULL)
-    thread_donate_priority (cur);
+  /* If lock is held by another thread, donate priority,
+     but only do the dotaion if not using mlfqs. */
+  if (!thread_mlfqs)
+    if (lock->holder != NULL)
+      thread_donate_priority (cur);
 
   sema_down (&lock->semaphore);
 
@@ -258,7 +261,9 @@ lock_release (struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
 
   list_remove (&lock->elem);
-  thread_recalculate_effective_priority ();
+  if (!thread_mlfqs)
+    thread_recalculate_effective_priority ();
+
   lock->holder = NULL;
   lock->priority = PRI_MIN;
   sema_up (&lock->semaphore);
@@ -343,7 +348,11 @@ cond_priority_less (const struct list_elem *lhs, const struct list_elem *rhs,
   struct thread *tr
       = list_entry (list_begin (&sr->semaphore.waiters), struct thread, elem);
 
-  return tl->effective_priority < tr->effective_priority;
+  /* There is no effective priority for the mlfqs scheduler */
+  if (thread_mlfqs)
+    return tl->priority < tr->priority;
+  else
+    return tl->effective_priority < tr->effective_priority;
 }
 
 /* If any threads are waiting on COND (protected by LOCK), then this function

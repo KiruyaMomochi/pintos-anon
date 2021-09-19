@@ -1,6 +1,7 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 
+#include "threads/fixed-point.h"
 #include "threads/synch.h"
 #include <debug.h>
 #include <list.h>
@@ -21,9 +22,15 @@ typedef int tid_t;
 #define TID_ERROR ((tid_t)-1) /* Error value for tid_t. */
 
 /* Thread priorities. */
-#define PRI_MIN 0      /* Lowest priority. */
-#define PRI_DEFAULT 31 /* Default priority. */
-#define PRI_MAX 63     /* Highest priority. */
+#define PRI_MIN 0         /* Lowest priority. */
+#define PRI_DEFAULT 31    /* Default priority. */
+#define PRI_MAX 63        /* Highest priority. */
+#define PRI_RECALC_FREQ 4 /* Frequency of priority recalculation. */
+
+/* Nice priorities. */
+#define NICE_MIN -20   /* Lowest priority. */
+#define NICE_DEFAULT 0 /* Default priority. */
+#define NICE_MAX 20    /* Highest priority. */
 
 /* A kernel thread or user process.
 
@@ -96,6 +103,7 @@ struct thread
   struct lock *waiting_lock;  /* Lock waiting on. */
   int effective_priority;     /* Effective priority. */
 
+  fixed_t recent_cpu; /* Recent CPU time. */
 
   /* Shared between thread.c and synch.c. */
   struct list_elem elem; /* List element. */
@@ -139,7 +147,7 @@ typedef void thread_action_func (struct thread *t, void *aux);
 void thread_foreach (thread_action_func *, void *);
 
 void thread_set_waiting_lock (struct lock *);
-struct lock* thread_clear_waiting_lock (void);
+struct lock *thread_clear_waiting_lock (void);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
