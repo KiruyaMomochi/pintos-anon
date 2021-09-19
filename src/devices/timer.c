@@ -83,22 +83,24 @@ static void
 sleeping_threads_tick (void)
 {
   struct list_elem *e = list_begin (&sleeping_threads);
+  struct list_elem *end = list_end (&sleeping_threads);
 
-  while (e != list_end (&sleeping_threads))
+  while (e != end)
     {
       struct sleeping_thread *sleeping_thread
           = list_entry (e, struct sleeping_thread, elem);
+
+      /* Since the element may be removed from the list, we need to save the
+         next element before we can access it. */
+      e = list_next (e);
+
       if (timer_elapsed (sleeping_thread->start_time)
           >= sleeping_thread->sleep_ticks)
         {
           /* Remove thread from list of sleeping threads. */
-          e = list_remove (&sleeping_thread->elem);
+          list_remove (&sleeping_thread->elem);
           /* Wake up thread. */
           sema_up (&sleeping_thread->semaphore);
-        }
-      else
-        {
-          e = list_next (e);
         }
     }
 }
