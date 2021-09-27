@@ -34,8 +34,7 @@ static void real_time_delay (int64_t num, int32_t denom);
 struct sleeping_thread
 {
   struct semaphore semaphore; /* Thread's semaphore. */
-  int64_t start_time;         /* Time when thread started sleeping. */
-  int64_t sleep_ticks;        /* Number of timer ticks to sleep. */
+  int64_t wake_time;          /* Time when thread should wake up. */
   struct list_elem elem;      /* List element. */
 };
 
@@ -51,11 +50,27 @@ sleeping_thread_init (struct sleeping_thread *sleeping_thread,
   ASSERT (sleeping_thread != NULL);
   ASSERT (start_time >= 0);
 
-  sleeping_thread->start_time = start_time;
-  sleeping_thread->sleep_ticks = sleep_ticks;
+  sleeping_thread->wake_time = start_time + sleep_ticks;
 
   /* Initialize thread's semaphore. */
   sema_init (&sleeping_thread->semaphore, 0);
+}
+
+/* Returns true if LHS should be waken earlier than RHS. */
+static bool
+sleeping_thread_less (const struct list_elem *a,
+                      const struct list_elem *b, void *aux UNUSED)
+{
+  ASSERT (a != NULL);
+  ASSERT (b != NULL);
+
+  const struct sleeping_thread *lhs = list_entry (a, struct sleeping_thread, elem);
+  const struct sleeping_thread *rhs = list_entry (b, struct sleeping_thread, elem);
+
+  ASSERT (lhs != NULL);
+  ASSERT (rhs != NULL);
+
+  return lhs->wake_time < rhs->wake_time;
 }
 
 /* Sleep until SLEEPING_THREAD has finished sleeping.
@@ -69,8 +84,9 @@ sleeping_threads_wait (struct sleeping_thread *sleeping_thread)
 
   old_level = intr_disable ();
 
-  /* Add thread to list of sleeping threads. */
-  list_push_back (&sleeping_threads, &sleeping_thread->elem);
+  /* Insert thread to list of sleeping threads. */
+  list_insert_ordered (&sleeping_threads, &sleeping_thread->elem,
+                       sleeping_thread_less, NULL);
   /* Wait for the thread to be woken up. */
   sema_down (&sleeping_thread->semaphore);
 
@@ -94,14 +110,17 @@ sleeping_threads_tick (void)
          next element before we can access it. */
       e = list_next (e);
 
-      if (timer_elapsed (sleeping_thread->start_time)
-          >= sleeping_thread->sleep_ticks)
+      if (timer_ticks () >= sleeping_thread->wake_time)
         {
           /* Remove thread from list of sleeping threads. */
           list_remove (&sleeping_thread->elem);
           /* Wake up thread. */
           sema_up (&sleeping_thread->semaphore);
         }
+      else {
+        /* Because the list is ordered, we can stop searching. */
+        break;
+      }
     }
 }
 
