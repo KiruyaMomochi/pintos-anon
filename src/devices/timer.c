@@ -98,6 +98,10 @@ sleeping_threads_wait (struct sleeping_thread *sleeping_thread)
 static void
 sleeping_threads_tick (void)
 {
+  enum intr_level old_level;
+
+  old_level = intr_disable ();
+
   struct list_elem *e = list_begin (&sleeping_threads);
   struct list_elem *end = list_end (&sleeping_threads);
 
@@ -122,6 +126,8 @@ sleeping_threads_tick (void)
         break;
       }
     }
+
+  intr_set_level (old_level);
 }
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
