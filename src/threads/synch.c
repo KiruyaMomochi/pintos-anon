@@ -213,9 +213,11 @@ lock_acquire (struct lock *lock)
 
   /* If lock is held by another thread, donate priority,
      but only do the dotaion if not using mlfqs. */
+  enum intr_level old_level = intr_disable ();
   if (!thread_mlfqs)
     if (lock->holder != NULL)
       thread_donate_priority (cur);
+  intr_set_level (old_level);
 
   sema_down (&lock->semaphore);
 
