@@ -28,9 +28,9 @@ typedef int tid_t;
 #define PRI_RECALC_FREQ 4 /* Frequency of priority recalculation. */
 
 /* Nice priorities. */
-#define NICE_MIN -20   /* Lowest priority. */
-#define NICE_DEFAULT 0 /* Default priority. */
-#define NICE_MAX 20    /* Highest priority. */
+#define NICE_MIN -20   /* Lowest nice. */
+#define NICE_DEFAULT 0 /* Default nice. */
+#define NICE_MAX 20    /* Highest nice. */
 
 /* A kernel thread or user process.
 
