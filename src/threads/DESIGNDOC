@@ -34,6 +34,8 @@ order of time.
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+In `timer.c`:
+
 > struct sleeping_thread
 > {
 >   struct semaphore semaphore; /* Thread's semaphore. */
@@ -101,6 +103,8 @@ cause the list to be traversed every time a thread wakes up.
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+In `thread.h`:
+
 > struct thread
 > {
 >   /* Owned by thread.c. */
@@ -131,6 +135,8 @@ cause the list to be traversed every time a thread wakes up.
 - `waiting_lock` saves the lock that the thread is waiting on.
 - `effective_priority` is the real priority which schedules the thread.
 
+In `synch.h`:
+
 > struct lock
 >  {
 >    struct thread *holder;      /* Thread holding lock (for debugging). */
@@ -150,16 +156,42 @@ cause the list to be traversed every time a thread wakes up.
 L1: A <- B <- C
 L2:        <- D <- E
 
+In the diagram above, A <- B means B is acquiring a lock that held by A.
+Then the waiting lock of B is A, and B has two acquired locks: C and D.
+
+The waiting lock is tracked in thread's `waiting_lock`, acquired locks.
+Acquired locks are tracked with `acquired_locks`.
+The donated priority to lock's holder is also saved in lock struct.
+
+When a new thread waiting on B, we donate the thread's priority to it's
+holder, and the holder of holder's waiting lock, and so on recursively.
+
+When a thread's priority is set, we set it's base priority, and 
+recalculate it's effective priority.
+
 ---- ALGORITHMS ----
 
 >> B3: How do you ensure that the highest priority thread waiting for
 >> a lock, semaphore, or condition variable wakes up first?
 
+Since we decide the next thread to run by finding the maximum element
+in the ready list, this thread must has the highest priority.
+
 >> B4: Describe the sequence of events when a call to lock_acquire()
 >> causes a priority donation.  How is nested donation handled?
 
+The priority donation process is activated when the lock is hold by
+another process. We set ("donate") our priority to lock, and then
+update the priority of the lock's holder. Finally, if the lock's
+holder also waiting on the lock, we repeat the process for that thread.
+
 >> B5: Describe the sequence of events when lock_release() is called
 >> on a lock that a higher-priority thread is waiting for.
+
+When the lock is released, remove the lock from the acquired lock list.
+Then we recalculate the effective priority of this thread, which is
+the maximum of base priority and acquired locks' priority. Finally,
+we clear holder of the lock and up the semaphore.
 
 ---- SYNCHRONIZATION ----
 
@@ -167,10 +199,22 @@ L2:        <- D <- E
 >> how your implementation avoids it.  Can you use a lock to avoid
 >> this race?
 
+Race may occur when we set the priority while doing priority donation.
+Our implementation avoids it by disabling interrupts when donating.
+
+We should not use lock to avoid it since acquiring lock may need
+to do priority donation.
+
 ---- RATIONALE ----
 
 >> B7: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
+
+We choose this design because it is intuitive and can keep interrupt
+time low. We have also considered to save pointer of donated priority
+in donated thread, but there is no advantage to do so. We still need
+to recalculate the effective priority of the thread after donation,
+since there may be more than one thread waiting on the lock.
 
 			  ADVANCED SCHEDULER
 			  ==================
@@ -301,6 +345,7 @@ Disadvantages:
 Refine:
 - Use a queue for each priority level, to make it a real BSD scheduler.
 - Do not modify synch.h, use a locker struct to save lock and priority.
+- Implement priority donation for the other Pintos synchronization constructs.
 
 >> C6: The assignment explains arithmetic for fixed-point math in
 >> detail, but it leaves it open to you to implement it.  Why did you
