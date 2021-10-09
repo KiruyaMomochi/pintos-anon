@@ -8,18 +8,22 @@
 
 >> Fill in the names and email addresses of your group members.
 
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
+Haotian Jing <jinght@shanghaitech.edu.cn>
+Qitan Long <longqt@shanghaitech.edu.cn>
 
 ---- PRELIMINARIES ----
 
 >> If you have any preliminary comments on your submission, notes for the
 >> TAs, or extra credit, please give them here.
 
+The commits are resorted for better understanding, so they may not in the
+order of time.
+
 >> Please cite any offline or online sources you consulted while
 >> preparing your submission, other than the Pintos documentation, course
 >> text, lecture notes, and course staff.
+
+- [Operating Systems: Three Easy Pieces](https://pages.cs.wisc.edu/~remzi/OSTEP/)
 
 			     ALARM CLOCK
 			     ===========
@@ -30,26 +34,63 @@ FirstName LastName <email@domain.example>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+> struct sleeping_thread
+> {
+>   struct semaphore semaphore; /* Thread's semaphore. */
+>   int64_t wake_time;          /* Time when thread should wake up. */
+>   struct list_elem elem;      /* List element. */
+> };
+
+- This struct is used to store a sleeping thread's information.
+
+> static struct list sleeping_threads;
+
+- This stores the list of all sleeping threads.
+
 ---- ALGORITHMS ----
 
 >> A2: Briefly describe what happens in a call to timer_sleep(),
 >> including the effects of the timer interrupt handler.
 
+When timer_sleep() is called, the thread is put into the sleeping_threads
+list. The insertion place is determined by the the thread's wakeup time.
+When a timer interrupt occurs, the thread list is traversed to find all
+threads that should wake up. The thread is then removed from the list and
+woken up one by one.
+
 >> A3: What steps are taken to minimize the amount of time spent in
 >> the timer interrupt handler?
+
+We use a previously sorted list to save these sleeping threads, so
+we don't need to traverse the list every time.
+The timer interrupt handler will stop traversing the list once it
+find a thread that should not be waken up.
 
 ---- SYNCHRONIZATION ----
 
 >> A4: How are race conditions avoided when multiple threads call
 >> timer_sleep() simultaneously?
 
+By disabling interrupts, see PintOS reference A.3.1.
+
 >> A5: How are race conditions avoided when a timer interrupt occurs
 >> during a call to timer_sleep()?
+
+By disabling interrupts.
+Since interrupts are disabled, no timer interrupts can occur.
 
 ---- RATIONALE ----
 
 >> A6: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
+
+We choose this design because it is intuitive and can keep the interrupt
+time as low as possible.
+
+We also considered to just append the sleeping thread to the list, and then
+iterate through the list to wake up the sleeping threads when the timer
+interrupt occurs. However, this method is not efficient because it will
+cause the list to be traversed every time a thread wakes up.
 
 			 PRIORITY SCHEDULING
 			 ===================
@@ -60,9 +101,54 @@ FirstName LastName <email@domain.example>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+> struct thread
+> {
+>   /* Owned by thread.c. */
+>   tid_t tid;                 /* Thread identifier. */
+>   enum thread_status status; /* Thread state. */
+>   char name[16];             /* Name (for debugging purposes). */
+>   uint8_t *stack;            /* Saved stack pointer. */
+>*  int priority;              /* Base Priority. */
+>   struct list_elem allelem;  /* List element for all threads list. */
+> 
+>+  struct list acquired_locks; /* Thread's acquired locks. */
+>+  struct lock *waiting_lock;  /* Lock waiting on. */
+>+  int effective_priority;     /* Effective priority. */
+> 
+>   /* Shared between thread.c and synch.c. */
+>   struct list_elem elem; /* List element. */
+> 
+> #ifdef USERPROG
+>   /* Owned by userprog/process.c. */
+>   uint32_t *pagedir; /* Page directory. */
+> #endif
+> 
+>   /* Owned by thread.c. */
+>   unsigned magic; /* Detects stack overflow. */
+> };
+
+- `acquired_locks` saves a list of locks that the thread has acquired.
+- `waiting_lock` saves the lock that the thread is waiting on.
+- `effective_priority` is the real priority which schedules the thread.
+
+> struct lock
+>  {
+>    struct thread *holder;      /* Thread holding lock (for debugging). */
+>    struct semaphore semaphore; /* Binary semaphore controlling access. */
+>
+>+   int priority;          /* Priority donated to lock's holder */
+>+   struct list_elem elem; /* List element for holder's acquired lock list */
+>  };
+
+- `priority` saves the priority donated to the lock's holder.
+- `elem` saves the list element for lock holder's acquired lock list.
+
 >> B2: Explain the data structure used to track priority donation.
 >> Use ASCII art to diagram a nested donation.  (Alternately, submit a
 >> .png file.)
+
+L1: A <- B <- C
+L2:        <- D <- E
 
 ---- ALGORITHMS ----
 
@@ -95,6 +181,68 @@ FirstName LastName <email@domain.example>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+> #define FIXED_FRACTION_BITS 14
+
+- This is the number of bits used to represent the fraction part of the
+  fixed-point type.
+
+> #define FIXED_FACTOR (1 << FIXED_FRACTION_BITS)
+
+- This is the scale factor for the integer part of the fixed-point type.
+
+> typedef int fixed_t;
+
+- `fixed_t' is the type used to represent the fixed-point type.
+
+> struct thread
+> {
+>   /* Owned by thread.c. */
+>   tid_t tid;                 /* Thread identifier. */
+>   enum thread_status status; /* Thread state. */
+>   char name[16];             /* Name (for debugging purposes). */
+>   uint8_t *stack;            /* Saved stack pointer. */
+>   int priority;              /* Base Priority. */
+>   struct list_elem allelem;  /* List element for all threads list. */
+>+  int nice;                  /* Nice value. */
+> 
+>   struct list acquired_locks; /* Thread's acquired locks. */
+>   struct lock *waiting_lock;  /* Lock waiting on. */
+>   int effective_priority;     /* Effective priority. */
+> 
+>+  fixed_t recent_cpu; /* Recent CPU time. */
+> 
+>   /* Shared between thread.c and synch.c. */
+>   struct list_elem elem; /* List element. */
+> 
+> #ifdef USERPROG
+>   /* Owned by userprog/process.c. */
+>   uint32_t *pagedir; /* Page directory. */
+> #endif
+> 
+>   /* Owned by thread.c. */
+>   unsigned magic; /* Detects stack overflow. */
+> };
+
+- `nice` is the nice value of the thread.
+- `recent_cpu` saves the recent CPU time of the thread.
+
+> fixed_t load_avg;
+
+- `load_avg` is used to estimate the average number of threads ready to
+  run over the past minute. 
+
+> #define PRI_RECALC_FREQ 4 /* Frequency of priority recalculation. */
+> 
+> /* Nice priorities. */
+> #define NICE_MIN -20   /* Lowest nice. */
+> #define NICE_DEFAULT 0 /* Default nice. */
+> #define NICE_MAX 20    /* Highest nice. */
+
+- The priority is recalculated every `PRI_RECALC_FREQ` ticks.
+- `NICE_MIN` is the lowest nice priority.
+- `NICE_DEFAULT` is the default nice priority.
+- `NICE_MAX` is the highest nice priority.
+
 ---- ALGORITHMS ----
 
 >> C2: Suppose threads A, B, and C have nice values 0, 1, and 2.  Each
@@ -105,23 +253,33 @@ FirstName LastName <email@domain.example>
 timer  recent_cpu    priority   thread
 ticks   A   B   C   A   B   C   to run
 -----  --  --  --  --  --  --   ------
- 0
- 4
- 8
-12
-16
-20
-24
-28
-32
-36
+ 0      0   0   0  63  61  59   A
+ 4      4   0   0  62  61  59   A
+ 8      8   0   0  61  61  59   B
+12      8   4   0  61  60  59   A
+16     12   4   0  60  60  59   B
+20     12   8   0  60  59  59   A
+24     16   8   0  59  59  59   C
+28     16   8   4  59  59  58   B
+32     16  12   4  59  58  58   A
+36     20  12   4  58  58  58   C
 
 >> C3: Did any ambiguities in the scheduler specification make values
 >> in the table uncertain?  If so, what rule did you use to resolve
 >> them?  Does this match the behavior of your scheduler?
 
+Yes.
+
+The specification doesn't say whether to recalculate recent_cpu first,
+or to increment current thread's recent cpu first. We choose to do the
+incremention first.
+
 >> C4: How is the way you divided the cost of scheduling between code
 >> inside and outside interrupt context likely to affect performance?
+
+The calculations are in the interrupt context, while the the scheduling
+process is outside. When there are too many threads to recalculate,
+performance issue may exists.
 
 ---- RATIONALE ----
 
@@ -130,12 +288,36 @@ ticks   A   B   C   A   B   C   to run
 >> time to work on this part of the project, how might you choose to
 >> refine or improve your design?
 
+Advantages:
+- Use a sorted wait list to speedup waiting process.
+- Associate donated priority with lock to avoid looking up.
+- Use assertions to ensure safety.
+
+Disadvantages:
+- Advanced scheduling spent lots of time in timer interrupt.
+- Priority scheduling may have too much abstraction.
+- Lock priority saved into lock instead of another struct.
+
+Refine:
+- Use a queue for each priority level, to make it a real BSD scheduler.
+- Do not modify synch.h, use a locker struct to save lock and priority.
+
 >> C6: The assignment explains arithmetic for fixed-point math in
 >> detail, but it leaves it open to you to implement it.  Why did you
 >> decide to implement it the way you did?  If you created an
 >> abstraction layer for fixed-point math, that is, an abstract data
 >> type and/or a set of functions or macros to manipulate fixed-point
 >> numbers, why did you do so?  If not, why not?
+
+Because fixed-point number is actually just a int, we just use typedef
+to make it a alias of int. And implement methods using functions.
+
+We also considered to use a, since that prevent accidently add fixed-point
+with number, but that will make we write more code, and may lead to more 
+bugs. We hope C has operator overload function like C++ or Rust.
+
+We make this abstraction layer to reduce duplication, so it is easier to
+read, understand, test and debug.
 
 			   SURVEY QUESTIONS
 			   ================
@@ -149,14 +331,24 @@ the quarter.
 >> In your opinion, was this assignment, or any one of the three problems
 >> in it, too easy or too hard?  Did it take too long or too little time?
 
+It is OK.
+
 >> Did you find that working on a particular part of the assignment gave
 >> you greater insight into some aspect of OS design?
+
+Yes.
 
 >> Is there some particular fact or hint we should give students in
 >> future quarters to help them solve the problems?  Conversely, did you
 >> find any of our guidance to be misleading?
 
+No.
+
 >> Do you have any suggestions for the TAs to more effectively assist
 >> students, either for future quarters or the remaining projects?
 
+No.
+
 >> Any other comments?
+
+RIIR.
