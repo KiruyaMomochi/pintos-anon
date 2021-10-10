@@ -225,6 +225,8 @@ since there may be more than one thread waiting on the lock.
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+In `fixed-point.h`:
+
 > #define FIXED_FRACTION_BITS 14
 
 - This is the number of bits used to represent the fraction part of the
@@ -237,6 +239,8 @@ since there may be more than one thread waiting on the lock.
 > typedef int fixed_t;
 
 - `fixed_t' is the type used to represent the fixed-point type.
+
+In `thread.h`:
 
 > struct thread
 > {
@@ -270,11 +274,6 @@ since there may be more than one thread waiting on the lock.
 - `nice` is the nice value of the thread.
 - `recent_cpu` saves the recent CPU time of the thread.
 
-> fixed_t load_avg;
-
-- `load_avg` is used to estimate the average number of threads ready to
-  run over the past minute.
-
 > #define PRI_RECALC_FREQ 4 /* Frequency of priority recalculation. */
 >
 > /* Nice priorities. */
@@ -286,6 +285,13 @@ since there may be more than one thread waiting on the lock.
 - `NICE_MIN` is the lowest nice priority.
 - `NICE_DEFAULT` is the default nice priority.
 - `NICE_MAX` is the highest nice priority.
+
+In `thread.c`:
+
+> fixed_t load_avg;
+
+- `load_avg` is used to estimate the average number of threads ready to
+  run over the past minute.
 
 ---- ALGORITHMS ----
 
