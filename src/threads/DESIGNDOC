@@ -363,9 +363,10 @@ Refine:
 Because fixed-point number is actually just a int, we just use typedef
 to make it a alias of int. And implement methods using functions.
 
-We also considered to use a, since that prevent accidently add fixed-point
-with number, but that will make we write more code, and may lead to more
-bugs. We hope C has operator overload function like C++ or Rust.
+We also considered to use a struct, since that prevent accidently add 
+fixed-point with number, but that will make we write more code, and may 
+lead to more bugs. We hope C has operator overload function like C++ 
+or Rust.
 
 We make this abstraction layer to reduce duplication, so it is easier to
 read, understand, test and debug.
