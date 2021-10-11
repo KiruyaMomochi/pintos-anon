@@ -1,0 +1,18 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${default}",
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/src/lib/kernel",
+                "${workspaceFolder}/src/lib"
+            ],
+            "compilerPath": "/usr/sbin/clang",
+            "cStandard": "c17",
+            "cppStandard": "c++14",
+            "intelliSenseMode": "linux-clang-x64"
+        }
+    ],
+    "version": 4
+}
