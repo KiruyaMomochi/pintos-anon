@@ -95,7 +95,15 @@ struct thread
 
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
+  pid_t pid;         /* Process identifier. */
   uint32_t *pagedir; /* Page directory. */
+  int exit_code;     /* Exit status. */
+
+  // TODO: Should we optmize this? Should this be a list?
+  // TODO: Should we use a struct? Or a hash table?
+  struct file **fd_table; /* File descriptor table. */
+  int fd_count;           /* Number of open files. */
+
 #endif
 
   /* Owned by thread.c. */
