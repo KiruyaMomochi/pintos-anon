@@ -24,6 +24,14 @@ typedef int tid_t;
 #define PRI_DEFAULT 31 /* Default priority. */
 #define PRI_MAX 63     /* Highest priority. */
 
+#ifdef USERPROG
+#include "filesys/file.h"
+#include "userprog/process.h"
+// TODO: Find a way to remove this limitation.
+/* Maximum number of open files for a thread. */
+#define MAX_FILES 128
+#endif
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -147,5 +155,11 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 struct thread *thread_find (tid_t tid);
+
+#ifdef USERPROG
+int thread_allocate_fd (struct file *);
+struct file *thread_get_file (int);
+void thread_free_fd (int fd);
+#endif
 
 #endif /* threads/thread.h */

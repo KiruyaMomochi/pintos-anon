@@ -609,3 +609,66 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+#ifdef USERPROG
+/* Allocate file descriptor for FILE. Returns -1 if failed. */
+int
+thread_allocate_fd (struct file *file)
+{
+  struct thread *t = thread_current ();
+  int fd;
+
+  /* Find an unused file descriptor in current fd_table. */
+  for (fd = 2; fd < t->fd_count; fd++)
+    {
+      if (t->fd_table[fd] == NULL)
+        {
+          t->fd_table[fd] = file;
+          return fd;
+        }
+    }
+
+  /* Try to extend fd_table if there is no unused fd. */
+  ASSERT (fd == t->fd_count)
+  int new_fd_count = t->fd_count * 2;
+  ASSERT (new_fd_count > t->fd_count);
+  struct file **new_fd_table
+      = realloc (t->fd_table, new_fd_count * sizeof (struct file *));
+  if (new_fd_table == NULL)
+    return -1;
+  memset (new_fd_table + t->fd_count, 0,
+          (new_fd_count - t->fd_count) * sizeof (struct file *));
+  t->fd_table = new_fd_table;
+  t->fd_count = new_fd_count;
+
+  /* Set file descriptor to new fd_table. */
+  ASSERT (t->fd_table[fd] == NULL);
+  t->fd_table[fd] = file;
+  return fd;
+}
+
+/* Get file for FD. */
+struct file *
+thread_get_file (int fd)
+{
+  struct thread *t = thread_current ();
+  ASSERT (fd >= 2 && fd < t->fd_count);
+  struct file *file = t->fd_table[fd];
+
+  // TODO: how to handle invalid fd?
+  ASSERT (file != NULL);
+  return file;
+}
+
+/* Free file descriptor FD. */
+void
+thread_free_fd (int fd)
+{
+  struct thread *t = thread_current ();
+  ASSERT (fd >= 2 && fd < t->fd_count);
+  // TODO: how to handle invalid fd?
+  ASSERT (t->fd_table[fd] != NULL);
+  t->fd_table[fd] = NULL;
+}
+
+#endif
