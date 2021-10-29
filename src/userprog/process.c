@@ -89,7 +89,9 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED)
 {
-  return -1;
+  /* FIXME: Replace this code with real implementation. */
+  while (true)
+    ;
 }
 
 /* Free the current process's resources. */
