@@ -184,15 +184,6 @@ thread_create (const char *name, int priority, thread_func *function,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
-#ifdef USERPROG
-  t->exit_code = -1;
-  /* Initialize the file descriptor table. */
-  t->fd_table = NULL;
-  /* Set the initial file descriptor table size to 2 because
-     stdin and stdout are reserved. */
-  t->fd_count = 2;
-#endif
-
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
@@ -490,6 +481,21 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *)t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+#ifdef USERPROG
+  t->exit_code = -1;
+  /* Initialize the file descriptor table. */
+  t->fd_table = NULL;
+  /* Set the initial file descriptor table size to 2 because
+     stdin and stdout are reserved. */
+  t->fd_count = 2;
+  /* Initialize the thread children list. */
+  list_init (&(t->chilren));
+  sema_init (&(t->wait_sema), 0);
+  sema_init (&(t->exit_sema), 0);
+  t->is_waited = false;
+  t->parent = NULL;
+#endif
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

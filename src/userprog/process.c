@@ -89,9 +89,10 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED)
 {
-  /* FIXME: Replace this code with real implementation. */
-  while (true)
-    ;
+  struct thread *t = thread_find (child_tid);
+
+  sema_down (&t->wait_sema);
+  sema_up (&t->exit_sema);
 }
 
 /* Free the current process's resources. */
