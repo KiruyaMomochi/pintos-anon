@@ -20,7 +20,7 @@
 #include <string.h>
 
 static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool load (char *cmdline, void (**eip) (void), void **esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -204,13 +204,21 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
 
+static int push_argv_arguments (void **esp, char *save_ptr);
+static void push_argv (void **esp, char *program_name, char *strtok_ptr);
+
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (const char *file_name, void (**eip) (void), void **esp)
+load (char *file_name, void (**eip) (void), void **esp)
 {
+  /* Divide file name into words at spaces */
+  char *save_ptr;
+  char *program_name = strtok_r (file_name, " ", &save_ptr);
+  ASSERT (program_name != NULL);
+
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
   struct file *file = NULL;
@@ -225,7 +233,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  file = filesys_open (program_name);
   if (file == NULL)
     {
       printf ("load: %s: open failed\n", file_name);
@@ -304,6 +312,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
+
+  /* Push arguments. */
+  push_argv (esp, program_name, save_ptr);
 
   /* Start address. */
   *eip = (void (*) (void))ehdr.e_entry;
@@ -422,6 +433,67 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       upage += PGSIZE;
     }
   return true;
+}
+
+static int
+push_argv_arguments (void **esp, char *save_ptr)
+{
+  /* Find the next token. */
+  char *token = strtok_r (NULL, " ", &save_ptr);
+
+  /* If we failed to get a token, we are at the end of argv. */
+  if (token == NULL)
+    {
+      /* Round stack pointer down to a multiple of 4 */
+      *esp -= (int)(*esp) % 4;
+
+      /* Push null pointer to argv[argc] */
+      *esp -= sizeof (char *);
+
+      return 0;
+    }
+
+  /* Push argv[i] */
+  *esp -= strlen (token) + 1;
+  memcpy (*esp, token, strlen (token) + 1);
+  char *argv = *esp;
+
+  /* Recursively push the next token. */
+  int argc = push_argv_arguments (esp, save_ptr) + 1;
+
+  /* Push address of argv[i] */
+  *esp -= sizeof (char *);
+  memcpy (*esp, &argv, sizeof (char *));
+
+  return argc;
+}
+
+static void
+push_argv (void **esp, char *program_name, char *strtok_ptr)
+{
+  /* Push argv[0] */
+  *esp -= strlen (program_name) + 1;
+  memcpy (*esp, program_name, strlen (program_name) + 1);
+  void *argv = *esp;
+
+  /* Push other arguments */
+  int argc = push_argv_arguments (esp, strtok_ptr) + 1;
+
+  /* Push address of argv[0] */
+  *esp -= sizeof (char *);
+  memcpy (*esp, &argv, sizeof (char *));
+  argv = *esp;
+
+  /* Push address of argv */
+  *esp -= sizeof (void *);
+  memcpy (*esp, &argv, sizeof (char **));
+
+  /* Push argc */
+  *esp -= sizeof (int);
+  memcpy (*esp, &argc, sizeof (int));
+
+  /* Push return address */
+  *esp -= sizeof (void *);
 }
 
 /* Create a minimal stack by mapping a zeroed page at the top of
