@@ -34,6 +34,6 @@ void debug_backtrace_all (void);
         }
 #define NOT_REACHED() PANIC ("executed an unreachable statement");
 #else
-#define ASSERT(CONDITION) ((void) 0)
+#define ASSERT(CONDITION) ((void) 0);
 #define NOT_REACHED() for (;;)
 #endif /* lib/debug.h */
