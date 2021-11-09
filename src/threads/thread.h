@@ -27,6 +27,7 @@ typedef int tid_t;
 #ifdef USERPROG
 #include "filesys/file.h"
 #include "userprog/process.h"
+#include "synch.h"
 // TODO: Find a way to remove this limitation.
 /* Maximum number of open files for a thread. */
 #define MAX_FILES 128
@@ -112,6 +113,13 @@ struct thread
   struct file **fd_table; /* File descriptor table. */
   int fd_count;           /* Number of open files. */
 
+  struct thread *parent;       /* Parent process. */
+  struct list chilren;         /* List of child processes. */
+  struct list_elem child_elem; /* List element for children list. */
+
+  struct semaphore wait_sema; /* Semaphore for waiting. */
+  struct semaphore exit_sema; /* Semaphore for exiting. */
+  bool is_waited;             /* Is the thread waited */
 #endif
 
   /* Owned by thread.c. */
