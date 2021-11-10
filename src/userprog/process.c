@@ -420,6 +420,8 @@ load (char *file_name, void (**eip) (void), void **esp)
   success = true;
 
   p->executable = filesys_open (program_name);
+  file_deny_write (p->executable);
+
 done:
   /* We arrive here whether the load is successful or not. */
   file_close (file);
