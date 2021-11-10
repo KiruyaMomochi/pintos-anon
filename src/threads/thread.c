@@ -7,6 +7,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include <debug.h>
+#include <kernel/debug.h>
 #include <random.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -197,6 +198,13 @@ thread_create (const char *name, int priority, thread_func *function,
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
   sf->ebp = 0;
+
+#ifdef USERPROG
+  /* Create process. */
+  struct process *p = process_create (t);
+  if (p == NULL)
+    return TID_ERROR;
+#endif
 
   /* Add to run queue. */
   thread_unblock (t);

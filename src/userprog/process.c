@@ -5,7 +5,9 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/gdt.h"
@@ -13,13 +15,16 @@
 #include "userprog/tss.h"
 #include <debug.h>
 #include <inttypes.h>
+#include <kernel/debug.h>
 #include <round.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool load (char *cmdline, void (**eip) (void), void **esp);
+static void init_process (struct process *p);
+
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -209,6 +214,7 @@ bool
 load (const char *file_name, void (**eip) (void), void **esp)
 {
   struct thread *t = thread_current ();
+  struct process *p = t->process;
   struct Elf32_Ehdr ehdr;
   struct file *file = NULL;
   off_t file_ofs;
@@ -307,6 +313,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   success = true;
 
+  p->executable = filesys_open (program_name);
 done:
   /* We arrive here whether the load is successful or not. */
   file_close (file);
@@ -459,4 +466,31 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+
+/* Does basic initialization of T as a process. */
+static void
+init_process (struct process *p)
+{
+  ASSERT (p != NULL);
+
+  p->exit_code = -1;
+  p->executable = NULL;
+}
+
+/* Returns the name of the running process. */
+const char *
+process_name (void)
+{
+  return process_current ()->name;
+}
+
+/* Returns the running process. */
+struct process *
+process_current (void)
+{
+  struct process *p = thread_current ()->process;
+  ASSERT (p != NULL);
+  return p;
 }
