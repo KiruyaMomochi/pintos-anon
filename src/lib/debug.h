@@ -13,6 +13,8 @@
    function name, plus a user-specific message. */
 #define PANIC(...) debug_panic (__FILE__, __LINE__, __func__, __VA_ARGS__)
 
+void debug_thread (const void *, const char *file, int line, const char *func, const char *fmt, ...);
+void debug_print (const char *file, int line, const char *func, const char *fmt, ...);
 void debug_panic (const char *file, int line, const char *function,
                   const char *message, ...) PRINTF_FORMAT (4, 5) NO_RETURN;
 void debug_backtrace (void);
@@ -26,14 +28,21 @@ void debug_backtrace_all (void);
    included multiple times with different settings of NDEBUG. */
 #undef ASSERT
 #undef NOT_REACHED
+#define NDEBUG
 
 #ifndef NDEBUG
+#define DEBUG_THREAD_T(t, fmt, ...) debug_thread (t, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+#define DEBUG_THREAD(fmt, ...) debug_thread (thread_current(), __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+#define DEBUG_PRINT(fmt, ...) debug_print (__FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 #define ASSERT(CONDITION)                                       \
         if (CONDITION) { } else {                               \
                 PANIC ("assertion `%s' failed.", #CONDITION);   \
         }
 #define NOT_REACHED() PANIC ("executed an unreachable statement");
 #else
-#define ASSERT(CONDITION) ((void) 0)
+#define DEBUG_THREAD_T(t, fmt, ...)
+#define DEBUG_THREAD(fmt, ...)
+#define DEBUG_PRINT(fmt, ...)
+#define ASSERT(CONDITION) ((void) 0);
 #define NOT_REACHED() for (;;)
 #endif /* lib/debug.h */

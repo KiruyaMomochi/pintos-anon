@@ -5,6 +5,7 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
@@ -19,8 +20,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "utils/colors.h"
+
 static thread_func start_process NO_RETURN;
 static bool load (char *cmdline, void (**eip) (void), void **esp);
+static pid_t allocate_pid (void);
+static void init_process (struct process *p);
+
+/* Lock used by allocate_pid() */
+static struct lock pid_lock;
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -31,6 +39,8 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
+
+  DEBUG_THREAD ("%s", file_name);
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -43,6 +53,13 @@ process_execute (const char *file_name)
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
+
+  struct thread *cur = thread_current ();
+  struct thread *t = thread_find (tid);
+  ASSERT (t != NULL);
+
+  t->process->parent = cur->process;
+  list_push_back (&(cur->process->chilren), &(t->process->child_elem));
   return tid;
 }
 
@@ -53,18 +70,20 @@ start_process (void *file_name_)
 {
   char *file_name = file_name_;
   struct intr_frame if_;
-  bool success;
+  struct thread *t = thread_current ();
+  struct process *p = t->process;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  p->load_success = load (file_name, &if_.eip, &if_.esp);
+  sema_up (&p->load_sema);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success)
+  if (!p->load_success)
     thread_exit ();
 
   /* Start the user process by simulating a return from an
@@ -87,24 +106,35 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED)
+process_wait (tid_t child_tid)
 {
   struct thread *t = thread_find (child_tid);
+  struct process *p = t->process;
 
-  sema_down (&t->wait_sema);
-  sema_up (&t->exit_sema);
+  sema_down (&p->wait_sema);
+  int exit_code = p->exit_code;
+  sema_up (&p->exit_sema);
+
+  sema_down (&p->wait_sema);
+  sema_up (&p->exit_sema);
+
+  return exit_code;
 }
 
 /* Free the current process's resources. */
 void
 process_exit (void)
 {
-  struct thread *cur = thread_current ();
+  struct thread *t = thread_current ();
+  struct process *p = t->process;
   uint32_t *pd;
+
+  /* Print the process's name and exit code. */
+  printf ("%s: exit(%d)\n", p->name, p->exit_code);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
-  pd = cur->pagedir;
+  pd = t->pagedir;
   if (pd != NULL)
     {
       /* Correct ordering here is crucial.  We must set
@@ -114,10 +144,55 @@ process_exit (void)
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
-      cur->pagedir = NULL;
+      t->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  // TODO: close all opened files
+  bool has_parent = p->parent != NULL;
+
+  if (has_parent)
+    {
+      sema_up (&p->wait_sema);
+      sema_down (&p->exit_sema);
+
+      /* Remove the process from the parent's children list. */
+      list_remove (&(p->child_elem));
+    }
+
+  /* Set children's parent to NULL */
+  struct list_elem *e;
+  for (e = list_begin (&p->chilren); e != list_end (&p->chilren);
+       e = list_next (e))
+    {
+      struct process *child = list_entry (e, struct process, child_elem);
+      child->parent = NULL;
+    }
+
+  /* Close all opened files */
+  for (size_t fd = 2; fd < p->fd_count; fd++)
+    {
+      file_close (p->fd_table[fd]);
+      process_free_fd (fd);
+    }
+  
+  /* Free fd table */
+  free (p->fd_table);
+
+  file_close (p->executable);
+
+  if (has_parent)
+    {
+      sema_up (&p->wait_sema);
+      sema_down (&p->exit_sema);
+    }
+
+  /* Free the process's resources. */
+  free (t->process);
+  t->process = NULL;
+
+  DEBUG_THREAD ("exit complete");
 }
 
 /* Sets up the CPU for running user code in the current
@@ -221,11 +296,15 @@ load (char *file_name, void (**eip) (void), void **esp)
   ASSERT (program_name != NULL);
 
   struct thread *t = thread_current ();
+  struct process *p = t->process;
   struct Elf32_Ehdr ehdr;
   struct file *file = NULL;
   off_t file_ofs;
   bool success = false;
   int i;
+
+  /* Set process name to program name */
+  strlcpy (p->name, program_name, sizeof t->process->name);
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
@@ -235,6 +314,7 @@ load (char *file_name, void (**eip) (void), void **esp)
 
   /* Open executable file. */
   file = filesys_open (program_name);
+
   if (file == NULL)
     {
       printf ("load: %s: open failed\n", file_name);
@@ -321,6 +401,9 @@ load (char *file_name, void (**eip) (void), void **esp)
   *eip = (void (*) (void))ehdr.e_entry;
 
   success = true;
+
+  p->executable = filesys_open (program_name);
+  file_deny_write (p->executable);
 
 done:
   /* We arrive here whether the load is successful or not. */
@@ -441,23 +524,25 @@ push_argv_arguments (void **esp, char *save_ptr)
 {
   /* Find the next token. */
   char *token = strtok_r (NULL, " ", &save_ptr);
+  char *argv = NULL;
 
   /* If we failed to get a token, we are at the end of argv. */
   if (token == NULL)
     {
       /* Round stack pointer down to a multiple of 4 */
-      *esp -= (int)(*esp) % 4;
+      *esp -= (unsigned int)(*esp) % 4;
 
       /* Push null pointer to argv[argc] */
-      *esp -= sizeof (char *);
+      *esp -= sizeof (uint8_t *);
+      memcpy (*esp, &argv, sizeof (uint8_t *));
 
       return 0;
     }
 
   /* Push argv[i] */
   *esp -= strlen (token) + 1;
-  memcpy (*esp, token, strlen (token) + 1);
-  char *argv = *esp;
+  strlcpy (*esp, token, strlen (token) + 1);
+  argv = *esp;
 
   /* Recursively push the next token. */
   int argc = push_argv_arguments (esp, save_ptr) + 1;
@@ -474,7 +559,7 @@ push_argv (void **esp, char *program_name, char *strtok_ptr)
 {
   /* Push argv[0] */
   *esp -= strlen (program_name) + 1;
-  memcpy (*esp, program_name, strlen (program_name) + 1);
+  strlcpy (*esp, program_name, strlen (program_name) + 1);
   void *argv = *esp;
 
   /* Push other arguments */
@@ -535,4 +620,154 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+/* Returns a pid to use for a new thread. */
+static pid_t
+allocate_pid (void)
+{
+  static pid_t next_pid = 1;
+  pid_t pid;
+
+  lock_acquire (&pid_lock);
+  pid = next_pid++;
+  lock_release (&pid_lock);
+
+  return pid;
+}
+
+void
+process_init (void)
+{
+  ASSERT (intr_get_level () == INTR_OFF);
+  lock_init (&pid_lock);
+
+  struct thread *t = thread_current ();
+  process_create (t);
+}
+
+/* Creates a new process. */
+pid_t
+process_create (struct thread *t)
+{
+  ASSERT (t != NULL);
+  ASSERT (t->process == NULL);
+
+  struct process *p = malloc (sizeof (struct process));
+  if (p == NULL)
+    return PID_ERROR;
+
+  p->pid = allocate_pid ();
+  init_process (p);
+
+  snprintf (p->name, sizeof (p->name), "[T]%s", t->name);
+  t->process = p;
+
+  return p->pid;
+}
+
+/* Does basic initialization of T as a process. */
+static void
+init_process (struct process *p)
+{
+  ASSERT (p != NULL);
+
+  p->exit_code = -1;
+  /* Initialize the file descriptor table. */
+  p->fd_table = NULL;
+  /* Set the initial file descriptor table size to 2 because
+    stdin and stdout are reserved. */
+  p->fd_count = 2;
+  /* Initialize the thread children list. */
+  list_init (&(p->chilren));
+  sema_init (&(p->load_sema), 0);
+  sema_init (&(p->wait_sema), 0);
+  sema_init (&(p->exit_sema), 0);
+  p->parent = NULL;
+  p->executable = NULL;
+}
+
+/* Returns the name of the running process. */
+const char *
+process_name (void)
+{
+  return process_current ()->name;
+}
+
+/* Returns the running process's pid. */
+pid_t
+process_pid (void)
+{
+  return process_current ()->pid;
+}
+
+/* Returns the running process. */
+struct process *
+process_current (void)
+{
+  struct process *p = thread_current ()->process;
+  ASSERT (p != NULL);
+  return p;
+}
+
+/* Allocate file descriptor for FILE. Returns -1 if failed. */
+int
+process_allocate_fd (struct file *file)
+{
+  struct process *p = process_current ();
+  int fd;
+
+  /* Find an unused file descriptor in current fd_table. */
+  for (fd = 2; fd < p->fd_count; fd++)
+    {
+      if (p->fd_table[fd] == NULL)
+        {
+          p->fd_table[fd] = file;
+          return fd;
+        }
+    }
+
+  /* Try to extend fd_table if there is no unused fd. */
+  ASSERT (fd == p->fd_count)
+  int new_fd_count = p->fd_count * 2;
+  ASSERT (new_fd_count > p->fd_count);
+  struct file **new_fd_table
+      = realloc (p->fd_table, new_fd_count * sizeof (struct file *));
+  if (new_fd_table == NULL)
+    return -1;
+  memset (new_fd_table + p->fd_count, 0,
+          (new_fd_count - p->fd_count) * sizeof (struct file *));
+  p->fd_table = new_fd_table;
+  p->fd_count = new_fd_count;
+
+  /* Set file descriptor to new fd_table. */
+  ASSERT (p->fd_table[fd] == NULL);
+  p->fd_table[fd] = file;
+  return fd;
+}
+
+/* Get file for FD. */
+struct file *
+process_get_file (int fd)
+{
+  struct process *p = process_current ();
+  if (fd < 2 || fd >= p->fd_count)
+    return NULL;
+  // TODO: other cases?
+
+  ASSERT (fd >= 2 && fd < p->fd_count);
+  struct file *file = p->fd_table[fd];
+
+  // ASSERT (file != NULL);
+  return file;
+}
+
+/* Free file descriptor FD. */
+void
+process_free_fd (int fd)
+{
+  struct process *p = process_current ();
+  ASSERT (fd >= 2 && fd < p->fd_count);
+  ASSERT (p->fd_table[fd] != NULL);
+  p->fd_table[fd] = NULL;
 }

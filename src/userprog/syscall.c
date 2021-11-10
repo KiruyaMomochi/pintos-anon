@@ -1,7 +1,9 @@
 #include "userprog/syscall.h"
+#include "debug.h"
 #include "devices/input.h"
 #include "devices/shutdown.h"
 #include "filesys/filesys.h"
+#include "pagedir.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/malloc.h"
@@ -27,21 +29,18 @@ static void seek (int fd, unsigned position);
 static unsigned tell (int fd);
 static void close (int fd);
 
-#define DEBUG_SYSCALL 0
-#ifdef DEBUG_SYSCALL
-#define DEBUG_PRINT_SYSCALL_START(...) \
-  printf (COLOR_HBLK); \
-  printf (__VA_ARGS__); \
+#ifndef NDEBUG
+#define DEBUG_PRINT_SYSCALL_START(...)                                        \
+  printf (COLOR_HBLK);                                                        \
+  printf (__VA_ARGS__);                                                       \
   printf (COLOR_RESET);
-#define DEBUG_PRINT_SYSCALL_END(...) \
-  printf (COLOR_CYN); \
-  printf (__VA_ARGS__); \
+#define DEBUG_PRINT_SYSCALL_END(...)                                          \
+  printf (COLOR_CYN);                                                         \
+  printf (__VA_ARGS__);                                                       \
   printf (COLOR_RESET "\n");
-#define DEBUG_PRINT(...) printf (__VA_ARGS__)
 #else
 #define DEBUG_PRINT_SYSCALL_START(...)
 #define DEBUG_PRINT_SYSCALL_END(...)
-#define DEBUG_PRINT(...)
 #endif
 
 /* Registers handlers for system call. */
@@ -51,123 +50,305 @@ syscall_init (void)
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
+/* Reads a byte at user virtual address UADDR.
+   UADDR must be below PHYS_BASE.
+   Returns the byte value if successful, -1 if a segfault
+   occurred. */
+static int
+get_user (const uint8_t *uaddr)
+{
+  int result;
+  asm("movl $1f, %0; movzbl %1, %0; 1:" : "=&a"(result) : "m"(*uaddr));
+  return result;
+}
+
+/* Writes BYTE to user address UDST.
+   UDST must be below PHYS_BASE.
+   Returns true if successful, false if a segfault occurred. */
+static bool
+put_user (uint8_t *udst, uint8_t byte)
+{
+  int error_code;
+  asm("movl $1f, %0; movb %b2, %1; 1:"
+      : "=&a"(error_code), "=m"(*udst)
+      : "q"(byte));
+  return error_code != -1;
+}
+
+/* Check if the address is invalid. */
+static bool
+is_invalid_address (const void *address)
+{
+  bool valid = address != NULL && is_user_vaddr (address);
+  if (valid && get_user ((const uint8_t *)address) == -1)
+    valid = false;
+
+  return !valid;
+}
+
+/* Exit if the address is invalid. */
 static void
-syscall_handler (struct intr_frame *f UNUSED)
+check_address (const void *address)
+{
+  if (!is_invalid_address (address))
+    return;
+
+  DEBUG_PRINT (COLOR_HRED "Invalid address: %p", address);
+  exit (-1);
+}
+
+/* Exit if the string is invalid. */
+static void
+check_string (const char *string)
+{
+  check_address (string);
+  while (*string != '\0')
+    check_address (++string);
+}
+
+/* Name of system call. */
+static const char *
+syscall_name (int syscall_number)
+{
+  switch (syscall_number)
+    {
+    case SYS_HALT:
+      return "halt";
+    case SYS_EXIT:
+      return "exit";
+    case SYS_EXEC:
+      return "exec";
+    case SYS_WAIT:
+      return "wait";
+    case SYS_CREATE:
+      return "create";
+    case SYS_REMOVE:
+      return "remove";
+    case SYS_OPEN:
+      return "open";
+    case SYS_FILESIZE:
+      return "filesize";
+    case SYS_READ:
+      return "read";
+    case SYS_WRITE:
+      return "write";
+    case SYS_SEEK:
+      return "seek";
+    case SYS_TELL:
+      return "tell";
+    case SYS_CLOSE:
+      return "close";
+    case SYS_MMAP:
+      return "mmap";
+    case SYS_MUNMAP:
+      return "munmap";
+    case SYS_CHDIR:
+      return "chdir";
+    case SYS_MKDIR:
+      return "mkdir";
+    case SYS_READDIR:
+      return "readdir";
+    case SYS_ISDIR:
+      return "isdir";
+    case SYS_INUMBER:
+      return "inumber";
+    default:
+      return "unknown";
+    }
+}
+
+/* Number of arguments of system call. */
+static size_t
+syscall_argc (int syscall_number)
+{
+  switch (syscall_number)
+    {
+    case SYS_HALT:
+      return 0;
+    case SYS_EXIT:
+      return 1;
+    case SYS_EXEC:
+      return 1;
+    case SYS_WAIT:
+      return 1;
+    case SYS_CREATE:
+      return 2;
+    case SYS_REMOVE:
+      return 1;
+    case SYS_OPEN:
+      return 1;
+    case SYS_FILESIZE:
+      return 1;
+    case SYS_READ:
+      return 3;
+    case SYS_WRITE:
+      return 3;
+    case SYS_SEEK:
+      return 2;
+    case SYS_TELL:
+      return 1;
+    case SYS_CLOSE:
+      return 1;
+    case SYS_MMAP:
+      return 2;
+    case SYS_MUNMAP:
+      return 1;
+    case SYS_CHDIR:
+      return 1;
+    case SYS_MKDIR:
+      return 1;
+    case SYS_READDIR:
+      return 2;
+    case SYS_ISDIR:
+      return 1;
+    case SYS_INUMBER:
+      return 1;
+    default:
+      return 0;
+    }
+}
+
+/* Length of arguments in bytes. */
+static size_t
+syscall_arg_size (int syscall_number)
+{
+  switch (syscall_number)
+    {
+    case SYS_HALT:
+      return 0;
+    case SYS_EXIT:
+      return sizeof (int);
+    case SYS_EXEC:
+      return sizeof (const char *);
+    case SYS_WAIT:
+      return sizeof (pid_t);
+    case SYS_CREATE:
+      return sizeof (const char *) + sizeof (unsigned);
+    case SYS_REMOVE:
+      return sizeof (const char *);
+    case SYS_OPEN:
+      return sizeof (const char *);
+    case SYS_FILESIZE:
+      return sizeof (int);
+    case SYS_READ:
+      return sizeof (int) + sizeof (void *) + sizeof (unsigned);
+    case SYS_WRITE:
+      return sizeof (int) + sizeof (const void *) + sizeof (unsigned);
+    case SYS_SEEK:
+      return sizeof (int) + sizeof (unsigned);
+    case SYS_TELL:
+      return sizeof (int);
+    case SYS_CLOSE:
+      return sizeof (int);
+    case SYS_MMAP:
+      return sizeof (int) + sizeof (void *);
+    case SYS_MUNMAP:
+      return sizeof (int);
+    case SYS_CHDIR:
+      return sizeof (const char *);
+    case SYS_MKDIR:
+      return sizeof (const char *);
+    case SYS_READDIR:
+      return sizeof (int) + sizeof (char *);
+    case SYS_ISDIR:
+      return sizeof (int);
+    case SYS_INUMBER:
+      return sizeof (int);
+    default:
+      return 0;
+    }
+}
+
+/* Exit if the system call sp or the argument is invalid. */
+static void
+check_sp_and_arg (int *sp)
+{
+  void *arg = (void *)sp;
+
+  for (size_t i = 0; i < sizeof (sp); i++)
+    check_address (++arg);
+
+  size_t arg_size = syscall_argc (get_user ((const uint8_t *)sp));
+  // DEBUG_THREAD ("%p %d", arg, arg_size);
+
+  for (size_t i = 0; i < arg_size; i++)
+    check_address (++arg);
+}
+
+static void
+syscall_handler (struct intr_frame *f)
 {
   int *sp = f->esp;
-  char *syscall_name;
-  uint32_t ret;
+  uint32_t ret = 0;
+
+  check_sp_and_arg (sp);
+  const char *syscall = syscall_name (*sp);
 
   switch (*sp)
     {
     case SYS_HALT:
-      syscall_name = "halt";
-      break;
-    case SYS_EXIT:
-      syscall_name = "exit";
-      break;
-    case SYS_EXEC:
-      syscall_name = "exec";
-      break;
-    case SYS_WAIT:
-      syscall_name = "wait";
-      break;
-    case SYS_CREATE:
-      syscall_name = "create";
-      break;
-    case SYS_REMOVE:
-      syscall_name = "remove";
-      break;
-    case SYS_OPEN:
-      syscall_name = "open";
-      break;
-    case SYS_FILESIZE:
-      syscall_name = "filesize";
-      break;
-    case SYS_READ:
-      syscall_name = "read";
-      break;
-    case SYS_WRITE:
-      syscall_name = "write";
-      break;
-    case SYS_SEEK:
-      syscall_name = "seek";
-      break;
-    case SYS_TELL:
-      syscall_name = "tell";
-      break;
-    case SYS_CLOSE:
-      syscall_name = "close";
-      break;
-    default:
-      syscall_name = "unknown";
-      break;
-    }
-  
-  switch (*sp)
-    {
-    case SYS_HALT:
       {
-        DEBUG_PRINT_SYSCALL_START ("(%s)", syscall_name);
+        DEBUG_PRINT_SYSCALL_START ("(%s)", syscall);
         halt ();
-        DEBUG_PRINT_SYSCALL_END ("[%s]", syscall_name);
+        DEBUG_PRINT_SYSCALL_END ("[%s]", syscall);
         break;
       }
     case SYS_EXIT:
       {
         int status = *(sp + 1);
-        DEBUG_PRINT_SYSCALL_START ("(%s (%d))", syscall_name, status);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%d))", syscall, status);
         exit (status);
-        DEBUG_PRINT_SYSCALL_END ("[%s (%d)]", syscall_name, status);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%d)]", syscall, status);
         break;
       }
     case SYS_EXEC:
       {
         char *cmd_line = (char *)*(sp + 1);
-        DEBUG_PRINT_SYSCALL_START ("(%s (%s))", syscall_name, cmd_line);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%s))", syscall, cmd_line);
         ret = exec (cmd_line); // TODO: Not finished
-        DEBUG_PRINT_SYSCALL_END ("[%s (%s) -> %d]", syscall_name, cmd_line, ret);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%s) -> %d]", syscall, cmd_line, ret);
         break;
       }
     case SYS_WAIT:
       {
         pid_t pid = *(sp + 1);
-        DEBUG_PRINT_SYSCALL_START ("(%s (%d))", syscall_name, pid);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%d))", syscall, pid);
         ret = wait (pid); // TODO: Not finished
-        DEBUG_PRINT_SYSCALL_END ("[%s (%d) -> %d]", syscall_name, pid, ret);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%d) -> %d]", syscall, pid, ret);
         break;
       }
     case SYS_CREATE:
       {
         char *file = (char *)*(sp + 1);
         unsigned initial_size = *(sp + 2);
-        DEBUG_PRINT_SYSCALL_START ("(%s (%s, %d))", syscall_name, file, initial_size);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%s, %d))", syscall, file,
+                                   initial_size);
         ret = create (file, initial_size);
-        DEBUG_PRINT_SYSCALL_END ("[%s (%s, %d) -> %d]", syscall_name, file, initial_size, ret);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%s, %d) -> %d]", syscall, file,
+                                 initial_size, ret);
         break;
       }
     case SYS_REMOVE:
       {
         char *file = (char *)*(sp + 1);
-        DEBUG_PRINT_SYSCALL_START ("(%s (%s))", syscall_name, file);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%s))", syscall, file);
         ret = remove (file);
-        DEBUG_PRINT_SYSCALL_END ("[%s (%s) -> %d]", syscall_name, file, ret);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%s) -> %d]", syscall, file, ret);
         break;
       }
     case SYS_OPEN:
       {
         char *file = (char *)*(sp + 1);
-        DEBUG_PRINT_SYSCALL_START ("(%s (%s))", syscall_name, file);
         ret = open (file);
-        DEBUG_PRINT_SYSCALL_END ("[%s (%s) -> %d]", syscall_name, file, ret);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%s) -> %d]", syscall, file, ret);
         break;
       }
     case SYS_FILESIZE:
       {
         int fd = *(sp + 1);
-        DEBUG_PRINT_SYSCALL_START ("(%s (%d))", syscall_name, fd);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%d))", syscall, fd);
         ret = filesize (fd);
-        DEBUG_PRINT_SYSCALL_END ("[%s (%d) -> %d]", syscall_name, fd, ret);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%d) -> %d]", syscall, fd, ret);
         break;
       }
     case SYS_READ:
@@ -175,9 +356,11 @@ syscall_handler (struct intr_frame *f UNUSED)
         int fd = *(sp + 1);
         void *buffer = (void *)*(sp + 2);
         unsigned size = *(sp + 3);
-        DEBUG_PRINT_SYSCALL_START ("(%s (%d, %p, %d))", syscall_name, fd, buffer, size);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%d, %p, %d))", syscall, fd, buffer,
+                                   size);
         ret = read (fd, buffer, size);
-        DEBUG_PRINT_SYSCALL_END ("[%s (%d, %p, %d) -> %d]", syscall_name, fd, buffer, size, ret);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%d, %p, %d) -> %d]", syscall, fd,
+                                 buffer, size, ret);
         break;
       }
     case SYS_WRITE:
@@ -185,38 +368,40 @@ syscall_handler (struct intr_frame *f UNUSED)
         int fd = *(sp + 1);
         const void *buffer = (const void *)*(sp + 2);
         unsigned size = *(sp + 3);
-        DEBUG_PRINT_SYSCALL_START ("(%s (%d, %p, %d))", syscall_name, fd, buffer, size);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%d, %p, %d))", syscall, fd, buffer,
+                                   size);
         ret = write (fd, buffer, size);
-        DEBUG_PRINT_SYSCALL_END ("[%s (%d, %p, %d) -> %d]", syscall_name, fd, buffer, size, ret);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%d, %p, %d) -> %d]", syscall, fd,
+                                 buffer, size, ret);
         break;
       }
     case SYS_SEEK:
       {
         int fd = *(sp + 1);
         unsigned position = *(sp + 2);
-        DEBUG_PRINT_SYSCALL_START ("(%s (%d, %d))", syscall_name, fd, position);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%d, %d))", syscall, fd, position);
         seek (fd, position);
-        DEBUG_PRINT_SYSCALL_END ("[%s (%d, %d)]", syscall_name, fd, position);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%d, %d)]", syscall, fd, position);
         break;
       }
     case SYS_TELL:
       {
         int fd = *(sp + 1);
-        DEBUG_PRINT_SYSCALL_START ("(%s (%d))", syscall_name, fd);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%d))", syscall, fd);
         ret = tell (fd);
-        DEBUG_PRINT_SYSCALL_END ("[%s (%d) -> %d]", syscall_name, fd, ret);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%d) -> %d]", syscall, fd, ret);
         break;
       }
     case SYS_CLOSE:
       {
         int fd = *(sp + 1);
-        DEBUG_PRINT_SYSCALL_START ("(%s (%d))", syscall_name, fd);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%d))", syscall, fd);
         close (fd);
-        DEBUG_PRINT_SYSCALL_END ("[%s (%d)]", syscall_name, fd);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%d)]", syscall, fd);
         break;
       }
     default:
-      // TODO: Handle unknown system call
+      PANIC (COLOR_RED "Unknown system call %s" COLOR_RESET, syscall);
       ret = -1;
       break;
     }
@@ -260,6 +445,7 @@ read_stdin (void *buffer, unsigned size)
   char *buf = buffer;
   for (unsigned i = 0; i < size; i++)
     {
+      check_address (buf);
       buf[i] = input_getc ();
     }
   return size;
@@ -272,6 +458,7 @@ write_stdout (const void *buffer, unsigned size)
   const char *buf = buffer;
   for (; size >= WRITE_BUF_SIZE; size -= WRITE_BUF_SIZE)
     {
+      check_address (buf);
       putbuf (buf, WRITE_BUF_SIZE);
       buf += WRITE_BUF_SIZE;
     }
@@ -288,8 +475,9 @@ static void
 exit (int status)
 {
   /* Set the exit status of the current thread. */
+  // TODO: process_current
   struct thread *cur = thread_current ();
-  cur->exit_code = status;
+  cur->process->exit_code = status;
 
   /* Exit the current thread. */
   thread_exit ();
@@ -301,9 +489,25 @@ exit (int status)
 static pid_t
 exec (const char *cmd_line)
 {
-  // TODO: Wait until we know if child process is successfully loaded.
-  // TODO: Check memory access.
+  check_string (cmd_line);
+
   tid_t tid = process_execute (cmd_line);
+  if (tid == TID_ERROR)
+    return PID_ERROR;
+
+  struct thread *t = thread_find (tid);
+  struct process *p = t->process;
+  if (p == NULL)
+    return PID_ERROR;
+
+  sema_down (&p->load_sema);
+  if (!p->load_success)
+    {
+      sema_up (&p->exit_sema);
+      ASSERT (p->exit_sema.value == 0);
+      return PID_ERROR;
+    }
+
   pid_t pid = tid_to_pid (tid);
   return pid;
 }
@@ -316,9 +520,25 @@ exec (const char *cmd_line)
 static int
 wait (pid_t pid)
 {
-  // TODO: Not implemented yet.
-  tid_t tid = pid_to_tid (pid);
-  return process_wait (tid);
+  // TODO: Return -1 for invalid pid.
+  if (pid == PID_ERROR)
+    return -1;
+
+  // TODO: Return -1 for pid that is not a child process.
+  struct list_elem *e;
+  struct process *p = process_current ();
+  for (e = list_begin (&p->chilren); e != list_end (&p->chilren);
+       e = list_next (e))
+    {
+      struct process *cp = list_entry (e, struct process, child_elem);
+      if (cp->pid == pid)
+        {
+          tid_t tid = pid_to_tid (pid);
+          return process_wait (tid);
+        }
+    }
+
+  return -1;
 }
 
 /* Creates a file called FILE initially INITIAL_SIZE bytes in size.
@@ -327,7 +547,8 @@ wait (pid_t pid)
 static bool
 create (const char *file, unsigned initial_size)
 {
-  // TODO: Check memory access.
+  check_string (file);
+
   return filesys_create (file, initial_size);
 }
 
@@ -337,7 +558,8 @@ create (const char *file, unsigned initial_size)
 static bool
 remove (const char *file)
 {
-  // TODO: Check memory access.
+  check_string (file);
+
   return filesys_remove (file);
 }
 
@@ -347,11 +569,13 @@ remove (const char *file)
 static int
 open (const char *file)
 {
-  // TODO: Check memory access.
+  check_string (file);
+  DEBUG_PRINT_SYSCALL_START ("(%s (%s))", "open", file);
+
   struct file *f = filesys_open (file);
   if (f == NULL)
     return -1;
-  int fd = thread_allocate_fd (f);
+  int fd = process_allocate_fd (f);
   return fd;
 }
 
@@ -359,7 +583,7 @@ open (const char *file)
 static int
 filesize (int fd)
 {
-  struct file *f = thread_get_file (fd);
+  struct file *f = process_get_file (fd);
   return file_length (f);
 }
 
@@ -369,14 +593,20 @@ filesize (int fd)
 static int
 read (int fd, void *buffer, unsigned size)
 {
-  // TODO: Check memory access.
+  check_address (buffer);
+
   if (fd == STDIN_FILENO)
     {
       return read_stdin (buffer, size);
     }
   else
     {
-      struct file *f = thread_get_file (fd);
+      struct file *f = process_get_file (fd);
+      if (f == NULL)
+        {
+          DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[open %d failed]", fd);
+          thread_exit ();
+        }
       return file_read (f, buffer, size);
     }
 }
@@ -387,14 +617,24 @@ read (int fd, void *buffer, unsigned size)
 static int
 write (int fd, const void *buffer, unsigned size)
 {
-  // TODO: Check memory access.
+  check_address (buffer);
+
+  // TODO: Use synchronization to ensure that only one thread can write to
+  //       the same file at a time.
+  // TODO: After add synchronization, we need to release the lock when
+  //       the write is not done and process exit abnormally.
   if (fd == STDOUT_FILENO)
     {
       return write_stdout (buffer, size);
     }
   else
     {
-      struct file *f = thread_get_file (fd);
+      struct file *f = process_get_file (fd);
+      if (f == NULL)
+        {
+          DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[open %d failed]", fd);
+          thread_exit ();
+        }
       return file_write (f, buffer, size);
     }
 }
@@ -405,7 +645,7 @@ write (int fd, const void *buffer, unsigned size)
 static void
 seek (int fd, unsigned position)
 {
-  struct file *f = thread_get_file (fd);
+  struct file *f = process_get_file (fd);
   file_seek (f, position);
 }
 
@@ -414,7 +654,7 @@ seek (int fd, unsigned position)
 static unsigned
 tell (int fd)
 {
-  struct file *f = thread_get_file (fd);
+  struct file *f = process_get_file (fd);
   return file_tell (f);
 }
 
@@ -422,7 +662,12 @@ tell (int fd)
 static void
 close (int fd)
 {
-  struct file *f = thread_get_file (fd);
+  struct file *f = process_get_file (fd);
+  if (f == NULL)
+    {
+      DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[close %d failed]", fd);
+      thread_exit ();
+    }
   file_close (f);
-  thread_free_fd (fd);
+  process_free_fd (fd);
 }
