@@ -27,7 +27,7 @@ static void init_process (struct process *p);
 
 /* Convert thread indentifier to process identifier. 
    TODO: pid <-> tid */
-static pid_t
+pid_t
 tid_to_pid (tid_t tid)
 {
   ASSERT (tid != TID_ERROR);
@@ -36,7 +36,7 @@ tid_to_pid (tid_t tid)
 
 /* Convert process identifier to thread indentifier. 
    TODO: pid <-> tid */
-static tid_t
+tid_t
 pid_to_tid (pid_t pid)
 {
   ASSERT (pid != PID_ERROR);

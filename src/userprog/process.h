@@ -6,6 +6,7 @@ typedef int pid_t;
 #define PID_ERROR ((pid_t)-1)
 
 #include "threads/thread.h"
+#include "threads/synch.h"
 
 struct process
 {
@@ -48,5 +49,8 @@ int process_allocate_fd (struct file *);
 struct file *process_get_file (int);
 void process_free_fd (int fd);
 struct process * process_find (pid_t pid);
+
+pid_t tid_to_pid (tid_t tid);
+tid_t pid_to_tid (pid_t pid);
 
 #endif /* userprog/process.h */
