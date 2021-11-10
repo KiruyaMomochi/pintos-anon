@@ -125,3 +125,64 @@ debug_backtrace_all (void)
   thread_foreach (print_stacktrace, 0);
   intr_set_level (oldlevel);
 }
+
+void
+debug_print (const char *file, int line, const char *func, const char *fmt,
+             ...)
+{
+  printf (COLOR_HBLK "%s:%d " COLOR_GRN "%s() " COLOR_HGRN, file, line, func);
+  va_list args;
+  va_start (args, fmt);
+  vprintf (fmt, args);
+  va_end (args);
+  printf (COLOR_RESET "\n");
+}
+
+void
+debug_thread (const void *curr, const char *file, int line, const char *func,
+              const char *fmt, ...)
+{
+  struct thread *cur = curr;
+  struct process *proc = cur->process;
+  enum thread_status status = cur->status;
+  char *status_str = NULL;
+  switch (status)
+    {
+    case THREAD_RUNNING:
+      status_str = "running";
+      break;
+    case THREAD_READY:
+      status_str = "ready";
+      break;
+    case THREAD_BLOCKED:
+      status_str = "blocked";
+      break;
+    case THREAD_DYING:
+      status_str = "dying";
+      break;
+    default:
+      status_str = "unknown";
+      break;
+    }
+
+  printf (COLOR_HBLK "[%d] '%s' status=%s", cur->tid, cur->name, status_str);
+
+  if (proc != NULL)
+    {
+      struct process *parent = proc->parent;
+      printf (" <'%s'> exit=%d", proc->name, proc->exit_code);
+      if (parent != NULL)
+        printf (" parent=%s", parent->name);
+    }
+  else
+    printf (" <no process>");
+
+  printf ("\n" COLOR_RESET);
+
+  printf (COLOR_HBLK "%s:%d " COLOR_GRN "%s() " COLOR_HGRN, file, line, func);
+  va_list args;
+  va_start (args, fmt);
+  vprintf (fmt, args);
+  va_end (args);
+  printf (COLOR_RESET "\n");
+}
