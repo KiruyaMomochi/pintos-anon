@@ -25,6 +25,24 @@ static thread_func start_process NO_RETURN;
 static bool load (char *cmdline, void (**eip) (void), void **esp);
 static void init_process (struct process *p);
 
+/* Convert thread indentifier to process identifier. 
+   TODO: pid <-> tid */
+static pid_t
+tid_to_pid (tid_t tid)
+{
+  ASSERT (tid != TID_ERROR);
+  return tid;
+}
+
+/* Convert process identifier to thread indentifier. 
+   TODO: pid <-> tid */
+static tid_t
+pid_to_tid (pid_t pid)
+{
+  ASSERT (pid != PID_ERROR);
+  return pid;
+}
+
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -47,6 +65,14 @@ process_execute (const char *file_name)
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
+
+  struct thread *cur = thread_current ();
+  struct thread *t = thread_find (tid);
+  DEBUG_THREAD ("%d, %d", tid, t->tid);
+  ASSERT (t != NULL);
+
+  t->process->parent = cur->process;
+  list_push_back (&(cur->process->chilren), &(t->process->child_elem));
   return tid;
 }
 
@@ -57,18 +83,20 @@ start_process (void *file_name_)
 {
   char *file_name = file_name_;
   struct intr_frame if_;
-  bool success;
+  struct thread *t = thread_current ();
+  struct process *p = t->process;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+  p->load_success = load (file_name, &if_.eip, &if_.esp);
+  sema_up (&p->load_sema);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success)
+  if (!p->load_success)
     thread_exit ();
 
   /* Start the user process by simulating a return from an
@@ -91,9 +119,22 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED)
+process_wait (tid_t child_tid)
 {
-  return -1;
+  // HACK: tid = pid so
+  pid_t pid = tid_to_pid(child_tid);
+  struct process *p = process_find (pid);
+  if (p == NULL)
+    return -1;
+
+  sema_down (&p->wait_sema);
+  int exit_code = p->exit_code;
+  sema_up (&p->exit_sema);
+
+  sema_down (&p->wait_sema);
+  sema_up (&p->exit_sema);
+
+  return exit_code;
 }
 
 /* Free the current process's resources. */
@@ -123,6 +164,33 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  bool has_parent = p->parent != NULL;
+
+  if (has_parent)
+    {
+      sema_up (&p->wait_sema);
+      sema_down (&p->exit_sema);
+
+      /* Remove the process from the parent's children list. */
+      list_remove (&(p->child_elem));
+    }
+
+  /* Set children's parent to NULL */
+  struct list_elem *e;
+  for (e = list_begin (&p->chilren); e != list_end (&p->chilren);
+       e = list_next (e))
+    {
+      struct process *child = list_entry (e, struct process, child_elem);
+      child->parent = NULL;
+    }
+
+
+  /* Free the process's resources. */
+  free (t->process);
+  t->process = NULL;
+
+  DEBUG_THREAD ("exit complete");
 }
 
 /* Sets up the CPU for running user code in the current
@@ -550,6 +618,56 @@ install_page (void *upage, void *kpage, bool writable)
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
 
+/* Returns the process with ID pid in children, or NULL if no such thread
+   exists. */
+struct process *
+process_find (pid_t pid)
+{
+  struct list_elem *e;
+
+  struct process *cur = process_current ();
+  ASSERT (cur != NULL);
+
+  for (e = list_begin (&cur->chilren); e != list_end (&cur->chilren);
+       e = list_next (e))
+    {
+      struct process *p = list_entry (e, struct process, child_elem);
+      if (p->pid == pid)
+        return p;
+    }
+  return NULL;
+}
+
+void
+process_init (void)
+{
+  ASSERT (intr_get_level () == INTR_OFF);
+
+  struct thread *t = thread_current ();
+  struct process *p = process_create (t);
+  if (p == NULL)
+    PANIC ("Failed to init process");
+}
+
+/* Creates a new process. */
+pid_t
+process_create (struct thread *t)
+{
+  ASSERT (t != NULL);
+  ASSERT (t->process == NULL);
+
+  struct process *p = malloc (sizeof (struct process));
+  if (p == NULL)
+    return PID_ERROR;
+
+  init_process (p);
+
+  snprintf (p->name, sizeof (p->name), "[T]%s", t->name);
+  t->process = p;
+  p->pid = t->tid;
+
+  return p->pid;
+}
 
 /* Does basic initialization of T as a process. */
 static void
@@ -558,6 +676,12 @@ init_process (struct process *p)
   ASSERT (p != NULL);
 
   p->exit_code = -1;
+  /* Initialize the thread children list. */
+  list_init (&(p->chilren));
+  sema_init (&(p->load_sema), 0);
+  sema_init (&(p->wait_sema), 0);
+  sema_init (&(p->exit_sema), 0);
+  p->parent = NULL;
   p->executable = NULL;
 }
 

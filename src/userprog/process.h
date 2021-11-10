@@ -16,8 +16,14 @@ struct process
   int exit_code; /* Exit status. */
 
 
+  struct process *parent;      /* Parent process. */
+  struct list chilren;         /* List of child processes. */
+  struct list_elem child_elem; /* List element for children list. */
+
   bool load_success; /* Whether the process was loaded successfully. */
   struct semaphore load_sema; /* Semaphore for loading. */
+  struct semaphore wait_sema; /* Semaphore for waiting. */
+  struct semaphore exit_sema; /* Semaphore for exiting. */
 
   struct file *executable; /* Executable file. */
 };
