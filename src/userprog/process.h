@@ -16,6 +16,9 @@ struct process
   int exit_code; /* Exit status. */
 
 
+  bool load_success; /* Whether the process was loaded successfully. */
+  struct semaphore load_sema; /* Semaphore for loading. */
+
   struct file *executable; /* Executable file. */
 };
 
