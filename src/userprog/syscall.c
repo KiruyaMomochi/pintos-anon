@@ -50,6 +50,61 @@ syscall_init (void)
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
+/* Reads a byte at user virtual address UADDR.
+   UADDR must be below PHYS_BASE.
+   Returns the byte value if successful, -1 if a segfault
+   occurred. */
+static int
+get_user (const uint8_t *uaddr)
+{
+  int result;
+  asm("movl $1f, %0; movzbl %1, %0; 1:" : "=&a"(result) : "m"(*uaddr));
+  return result;
+}
+
+/* Writes BYTE to user address UDST.
+   UDST must be below PHYS_BASE.
+   Returns true if successful, false if a segfault occurred. */
+static bool
+put_user (uint8_t *udst, uint8_t byte)
+{
+  int error_code;
+  asm("movl $1f, %0; movb %b2, %1; 1:"
+      : "=&a"(error_code), "=m"(*udst)
+      : "q"(byte));
+  return error_code != -1;
+}
+
+/* Check if the address is invalid. */
+static bool
+is_invalid_address (const void *address)
+{
+  bool valid = address != NULL && is_user_vaddr (address);
+  if (valid && get_user ((const uint8_t *)address) == -1)
+    valid = false;
+
+  return !valid;
+}
+
+/* Exit if the address is invalid. */
+static void
+check_address (const void *address)
+{
+  if (!is_invalid_address (address))
+    return;
+
+  DEBUG_PRINT (COLOR_HRED "Invalid address: %p", address);
+  exit (-1);
+}
+
+/* Exit if the string is invalid. */
+static void
+check_string (const char *string)
+{
+  check_address (string);
+  while (*string != '\0')
+    check_address (++string);
+}
 
 /* Name of system call. */
 static const char *
@@ -153,6 +208,8 @@ syscall_argc (int syscall_number)
     }
 }
 
+
+/* Handle syscals and also check if inputs are correct */
 static void
 syscall_handler (struct intr_frame *f)
 {
