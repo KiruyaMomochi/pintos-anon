@@ -3,6 +3,7 @@
 #include "devices/input.h"
 #include "devices/shutdown.h"
 #include "filesys/filesys.h"
+#include "kernel/debug.h"
 #include "pagedir.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
@@ -208,6 +209,21 @@ syscall_argc (int syscall_number)
     }
 }
 
+/* Exit if the system call sp or the argument is invalid. */
+static void
+check_sp_and_arg (int *sp)
+{
+  void *arg = (void *)sp;
+
+  for (size_t i = 0; i < sizeof (sp); i++)
+    check_address (++arg);
+
+  size_t arg_size = syscall_argc (get_user ((const uint8_t *)sp));
+  // DEBUG_THREAD ("%p %d", arg, arg_size);
+
+  for (size_t i = 0; i < arg_size; i++)
+    check_address (++arg);
+}
 
 /* Handle syscals and also check if inputs are correct */
 static void
@@ -240,7 +256,7 @@ syscall_handler (struct intr_frame *f)
       {
         char *cmd_line = (char *)*(sp + 1);
         DEBUG_PRINT_SYSCALL_START ("(%s (%s))", syscall, cmd_line);
-        ret = exec (cmd_line); // TODO: Not finished
+        ret = exec (cmd_line);
         DEBUG_PRINT_SYSCALL_END ("[%s (%s) -> %d]", syscall, cmd_line, ret);
         break;
       }
@@ -248,7 +264,7 @@ syscall_handler (struct intr_frame *f)
       {
         pid_t pid = *(sp + 1);
         DEBUG_PRINT_SYSCALL_START ("(%s (%d))", syscall, pid);
-        ret = wait (pid); // TODO: Not finished
+        ret = wait (pid);
         DEBUG_PRINT_SYSCALL_END ("[%s (%d) -> %d]", syscall, pid, ret);
         break;
       }
@@ -274,7 +290,6 @@ syscall_handler (struct intr_frame *f)
     case SYS_OPEN:
       {
         char *file = (char *)*(sp + 1);
-        DEBUG_PRINT_SYSCALL_START ("(%s (%s))", syscall, file);
         ret = open (file);
         DEBUG_PRINT_SYSCALL_END ("[%s (%s) -> %d]", syscall, file, ret);
         break;
@@ -345,9 +360,235 @@ syscall_handler (struct intr_frame *f)
   f->eax = ret;
   // thread_exit ();
 }
+
+/* Terminates Pintos by calling shutdown_power_off() (declared in
+   "threads/init.h"). This should be seldom used, because you lose
+   the ability to shut down the system. */
 static void
-syscall_handler (struct intr_frame *f UNUSED) 
+halt (void)
 {
-  printf ("system call!\n");
+  shutdown_power_off ();
+}
+
+/* Reads SIZE bytes from the keyboard using input_getc() into BUFFER.
+   Returns the number of bytes actually read. */
+static int
+read_stdin (void *buffer, unsigned size)
+{
+  char *buf = buffer;
+  for (unsigned i = 0; i < size; i++)
+    {
+      check_address (buf);
+      buf[i] = input_getc ();
+    }
+  return size;
+}
+
+/* Writes all SIZE bytes from BUFFER to the console. */
+static int
+write_stdout (const void *buffer, unsigned size)
+{
+  const char *buf = buffer;
+  for (; size >= WRITE_BUF_SIZE; size -= WRITE_BUF_SIZE)
+    {
+      check_address (buf);
+      putbuf (buf, WRITE_BUF_SIZE);
+      buf += WRITE_BUF_SIZE;
+    }
+  putbuf (buf, size);
+
+  return size;
+}
+
+/* Terminates the current user program, returning STATUS to the kernel.
+   If the process's parent waits for it (see below), this is the status
+   that will be returned. Conventionally, a status of 0 indicates success
+   and nonzero values indicate errors. */
+static void
+exit (int status)
+{
+  /* Set the exit status of the current thread. */
+  // TODO: process_current
+  struct process *p = process_current ();
+  p->exit_code = status;
+
+  /* Exit the current thread. */
   thread_exit ();
+}
+
+/* Runs the executable whose name is given in CMD_LINE, passing any given
+   arguments, and returns the new process's program id (pid). If the program
+   cannot load or run for any reason, returns -1. */
+static pid_t
+exec (const char *cmd_line)
+{
+  check_string (cmd_line);
+
+  tid_t tid = process_execute (cmd_line);
+  if (tid == TID_ERROR)
+    return PID_ERROR;
+
+  struct thread *t = thread_find (tid);
+  struct process *p = t->process;
+  if (p == NULL)
+    return PID_ERROR;
+
+  sema_down (&p->load_sema);
+  if (!p->load_success)
+    {
+      sema_up (&p->exit_sema);
+      sema_up (&p->exit_sema);
+      sema_down (&p->wait_sema);
+      sema_down (&p->wait_sema);
+      return PID_ERROR;
+    }
+
+  pid_t pid = tid_to_pid (tid);
+  return pid;
+}
+
+/* Waits for a child process PID and retrieves the child's exit status.
+   If PID is still alive, waits until it terminates. Then, returns the
+   status that pid passed to exit. If pid did not call exit(), but was
+   terminated by the kernel (e.g. killed due to an exception), wait(pid)
+   returns -1. */
+static int
+wait (pid_t pid)
+{
+  // TODO: Return -1 for invalid pid.
+  if (pid == PID_ERROR)
+    return -1;
+
+  return process_wait (pid);
+}
+
+/* Creates a file called FILE initially INITIAL_SIZE bytes in size.
+   Returns true if successful, false otherwise. Creating a file does not
+   open it. To open a file, use open(). */
+static bool
+create (const char *file, unsigned initial_size)
+{
+  check_string (file);
+
+  return filesys_create (file, initial_size);
+}
+
+/* Deletes the file called FILE. Returns true if successful, false
+   otherwise. A file may be removed regardless of whether it is open or
+   closed, and removing an open file does not close it. */
+static bool
+remove (const char *file)
+{
+  check_string (file);
+
+  return filesys_remove (file);
+}
+
+/* Opens the file called FILE. Returns a nonnegative integer handle
+   called a "file descriptor" (fd), or -1 if the file could not be
+   opened. */
+static int
+open (const char *file)
+{
+  check_string (file);
+  DEBUG_PRINT_SYSCALL_START ("(%s (%s))", "open", file);
+
+  struct file *f = filesys_open (file);
+  if (f == NULL)
+    return -1;
+  int fd = process_allocate_fd (f);
+  return fd;
+}
+
+/* Returns the size, in bytes, of the file open as FS. */
+static int
+filesize (int fd)
+{
+  struct file *f = process_get_file (fd);
+  return file_length (f);
+}
+
+/* Reads SIZE bytes from the file open as FD into BUFFER. Returns the
+   number of bytes actually read (0 at end of file), or -1 if the file
+   could not be read (due to a condition other than end of file). */
+static int
+read (int fd, void *buffer, unsigned size)
+{
+  check_address (buffer);
+
+  if (fd == STDIN_FILENO)
+    {
+      return read_stdin (buffer, size);
+    }
+  else
+    {
+      struct file *f = process_get_file (fd);
+      if (f == NULL)
+        {
+          DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[open %d failed]", fd);
+          thread_exit ();
+        }
+      return file_read (f, buffer, size);
+    }
+}
+
+/* Writes SIZE bytes from BUFFER to the open file FD. Returns the number
+   of bytes actually written, which may be less than SIZE if some bytes
+   could not be written. */
+static int
+write (int fd, const void *buffer, unsigned size)
+{
+  check_address (buffer);
+
+  // TODO: Use synchronization to ensure that only one thread can write to
+  //       the same file at a time.
+  // TODO: After add synchronization, we need to release the lock when
+  //       the write is not done and process exit abnormally.
+  if (fd == STDOUT_FILENO)
+    {
+      return write_stdout (buffer, size);
+    }
+  else
+    {
+      struct file *f = process_get_file (fd);
+      if (f == NULL)
+        {
+          DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[open %d failed]", fd);
+          thread_exit ();
+        }
+      return file_write (f, buffer, size);
+    }
+}
+
+/* Changes the next byte to be read or written in open file FD to
+   position POSITION, expressed as a byte offset from the beginning of
+   the file. (Thus, a position of 0 is the file's start.) */
+static void
+seek (int fd, unsigned position)
+{
+  struct file *f = process_get_file (fd);
+  file_seek (f, position);
+}
+
+/* Returns the position of the next byte to be read or written in open
+   file FD, expressed in bytes from the beginning of the file. */
+static unsigned
+tell (int fd)
+{
+  struct file *f = process_get_file (fd);
+  return file_tell (f);
+}
+
+/* Closes file descriptor FD. */
+static void
+close (int fd)
+{
+  struct file *f = process_get_file (fd);
+  if (f == NULL)
+    {
+      DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[close %d failed]", fd);
+      thread_exit ();
+    }
+  file_close (f);
+  process_free_fd (fd);
 }
