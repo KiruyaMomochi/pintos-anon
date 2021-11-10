@@ -15,6 +15,10 @@ struct process
   pid_t pid;     /* Process Id */
   int exit_code; /* Exit status. */
 
+  // TODO: Should we optmize this? Should this be a list?
+  // TODO: Should we use a struct? Or a hash table?
+  struct file **fd_table; /* File descriptor table. */
+  int fd_count;           /* Number of open files. */
 
   struct process *parent;      /* Parent process. */
   struct list chilren;         /* List of child processes. */
@@ -39,5 +43,10 @@ const char *process_name (void);
 struct process *process_current (void);
 
 pid_t process_create (struct thread *t);
+
+int process_allocate_fd (struct file *);
+struct file *process_get_file (int);
+void process_free_fd (int fd);
+struct process * process_find (pid_t pid);
 
 #endif /* userprog/process.h */

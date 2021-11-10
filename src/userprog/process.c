@@ -185,6 +185,25 @@ process_exit (void)
       child->parent = NULL;
     }
 
+  /* Close all opened files */
+  for (size_t fd = 2; fd < p->fd_count; fd++)
+    {
+      if (p->fd_table[fd] == NULL)
+        continue;
+      file_close (p->fd_table[fd]);
+      process_free_fd (fd);
+    }
+
+  /* Free fd table */
+  free (p->fd_table);
+
+  file_close (p->executable);
+
+  if (has_parent)
+    {
+      sema_up (&p->wait_sema);
+      sema_down (&p->exit_sema);
+    }
 
   /* Free the process's resources. */
   free (t->process);
@@ -676,6 +695,11 @@ init_process (struct process *p)
   ASSERT (p != NULL);
 
   p->exit_code = -1;
+  /* Initialize the file descriptor table. */
+  p->fd_table = NULL;
+  /* Set the initial file descriptor table size to 2 because
+    stdin and stdout are reserved. */
+  p->fd_count = 2;
   /* Initialize the thread children list. */
   list_init (&(p->chilren));
   sema_init (&(p->load_sema), 0);
@@ -699,4 +723,66 @@ process_current (void)
   struct process *p = thread_current ()->process;
   ASSERT (p != NULL);
   return p;
+}
+
+/* Allocate file descriptor for FILE. Returns -1 if failed. */
+int
+process_allocate_fd (struct file *file)
+{
+  struct process *p = process_current ();
+  int fd;
+
+  /* Find an unused file descriptor in current fd_table. */
+  for (fd = 2; fd < p->fd_count; fd++)
+    {
+      if (p->fd_table[fd] == NULL)
+        {
+          p->fd_table[fd] = file;
+          return fd;
+        }
+    }
+
+  /* Try to extend fd_table if there is no unused fd. */
+  ASSERT (fd == p->fd_count)
+  int new_fd_count = p->fd_count * 2;
+  ASSERT (new_fd_count > p->fd_count);
+  struct file **new_fd_table
+      = realloc (p->fd_table, new_fd_count * sizeof (struct file *));
+  if (new_fd_table == NULL)
+    return -1;
+  memset (new_fd_table + p->fd_count, 0,
+          (new_fd_count - p->fd_count) * sizeof (struct file *));
+  p->fd_table = new_fd_table;
+  p->fd_count = new_fd_count;
+
+  /* Set file descriptor to new fd_table. */
+  ASSERT (p->fd_table[fd] == NULL);
+  p->fd_table[fd] = file;
+  return fd;
+}
+
+/* Get file for FD. */
+struct file *
+process_get_file (int fd)
+{
+  struct process *p = process_current ();
+  if (fd < 2 || fd >= p->fd_count)
+    return NULL;
+  // TODO: other cases?
+
+  ASSERT (fd >= 2 && fd < p->fd_count);
+  struct file *file = p->fd_table[fd];
+
+  // ASSERT (file != NULL);
+  return file;
+}
+
+/* Free file descriptor FD. */
+void
+process_free_fd (int fd)
+{
+  struct process *p = process_current ();
+  ASSERT (fd >= 2 && fd < p->fd_count);
+  ASSERT (p->fd_table[fd] != NULL);
+  p->fd_table[fd] = NULL;
 }
