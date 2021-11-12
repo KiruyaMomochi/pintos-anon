@@ -4,13 +4,12 @@
 		     | 	   DESIGN DOCUMENT     	|
 		     +--------------------------+
 
----- GROUP ----
+---- GROUP22 ----
 
 >> Fill in the names and email addresses of your group members.
 
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
+Qitan Long <longqt@shanghaitech.edu.cn>
+Haotian Jing <jinght@shanghaitech.edu.cn>
 
 ---- PRELIMINARIES ----
 
@@ -36,13 +35,21 @@ FirstName LastName <email@domain.example>
 >> you arrange for the elements of argv[] to be in the right order?
 >> How do you avoid overflowing the stack page?
 
+Add the arguments downward,then add their addresses from the last one to the first.
+Push the address of argv and argc representing the length of argv[] at the end of the stack.
+
 ---- RATIONALE ----
 
 >> A3: Why does Pintos implement strtok_r() but not strtok()?
 
+Protect from multiple access by different process.
+
 >> A4: In Pintos, the kernel separates commands into a executable name
 >> and arguments.  In Unix-like systems, the shell does this
 >> separation.  Identify at least two advantages of the Unix approach.
+
+Prevent user from direct calling kernel function.
+
 
 			     SYSTEM CALLS
 			     ============
@@ -53,14 +60,73 @@ FirstName LastName <email@domain.example>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+struct process
+{
+  struct thread *thread;
+  char name[16];
+
+  pid_t pid;     /* Process Id */
+  int exit_code; /* Exit status. */
+
+  // TODO: Should we optmize this? Should this be a list?
+  // TODO: Should we use a struct? Or a hash table?
+  struct file **fd_table; /* File descriptor table. */
+  int fd_count;           /* Number of open files. */
+
+  struct process *parent;      /* Parent process. */
+  struct list chilren;         /* List of child processes. */
+  struct list_elem child_elem; /* List element for children list. */
+
+  bool load_success; /* Whether the process was loaded successfully. */
+  struct semaphore load_sema; /* Semaphore for loading. */
+  struct semaphore wait_sema; /* Semaphore for waiting. */
+  struct semaphore exit_sema; /* Semaphore for exiting. */
+
+  struct file *executable; /* Executable file. */
+};
+
+Illusion of process.
+
+struct thread
+{
+  /* Owned by thread.c. */
+  tid_t tid;                 /* Thread identifier. */
+  enum thread_status status; /* Thread state. */
+  char name[16];             /* Name (for debugging purposes). */
+  uint8_t *stack;            /* Saved stack pointer. */
+  int priority;              /* Priority. */
+  struct list_elem allelem;  /* List element for all threads list. */
+
+  /* Shared between thread.c and synch.c. */
+  struct list_elem elem; /* List element. */
+
+#ifdef USERPROG
+  /* Owned by userprog/process.c. */
+  uint32_t *pagedir; /* Page directory. */
+  + struct process *process;
+#endif
+
+  /* Owned by thread.c. */
+  unsigned magic; /* Detects stack overflow. */
+};
+
+Add the thread's corresponding process. 
+
 >> B2: Describe how file descriptors are associated with open files.
 >> Are file descriptors unique within the entire OS or just within a
 >> single process?
+
+We use a dynamic array to record fd.
+This array is unique within a single process.
 
 ---- ALGORITHMS ----
 
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
+
+Sys_Handler call SYS_READ/SYS_WRITE ,then check the file pointer's value.
+If 0(Read)/1(Write),representing standard io, get the arguments into buffer.
+Otherwise get from file f ,located by fp, and read/write from file. 
 
 >> B4: Suppose a system call causes a full page (4,096 bytes) of data
 >> to be copied from user space into the kernel.  What is the least
@@ -69,8 +135,14 @@ FirstName LastName <email@domain.example>
 >> for a system call that only copies 2 bytes of data?  Is there room
 >> for improvement in these numbers, and how much?
 
+
+
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
+
+Every call for wait by a process sema_down its wait_sema.
+When this process is scheduled to run again(now thread is dying), store exit_code and wake other process.
+Wait to be woken up again(time to die).then wake other process and return exit_code;
 
 >> B6: Any access to user program memory at a user-specified address
 >> can fail due to a bad pointer value.  Such accesses must cause the
@@ -86,12 +158,16 @@ FirstName LastName <email@domain.example>
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
 
+
+
 ---- SYNCHRONIZATION ----
 
 >> B7: The "exec" system call returns -1 if loading the new executable
 >> fails, so it cannot return before the new executable has completed
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
+
+We wake other processes and sleep this process.If this process is still woken up, return PID_ERRORs.
 
 >> B8: Consider parent process P with child process C.  How do you
 >> ensure proper synchronization and avoid race conditions when P
@@ -100,16 +176,28 @@ FirstName LastName <email@domain.example>
 >> terminates without waiting, before C exits?  After C exits?  Are
 >> there any special cases?
 
+When a process exits with parent, it wakes up other process and then sleep.
+This ensures no race condition between P and C.(They wait until all process are waiting to exit)
+When it woken up again, delete itself from child_list and free its file descripters and its pointers to parent.
+Then wait until other parent processes to be freed.
+This ensures no process will terminate until all process has been freed.
+
 ---- RATIONALE ----
 
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
 
+
+
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
 
+Advantage: efficient to fetch every files' address.
+Disadvantage: frequent memory allocation, may waste a large amount of memory.
 >> B11: The default tid_t to pid_t mapping is the identity mapping.
 >> If you changed it, what advantages are there to your approach?
+
+Did not change, a tid represent a pid.
 
 			   SURVEY QUESTIONS
 			   ================
