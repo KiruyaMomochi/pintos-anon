@@ -116,7 +116,7 @@ Add the thread's corresponding process.
 >> Are file descriptors unique within the entire OS or just within a
 >> single process?
 
-We use a dynamic array to record fd.
+We use a dynamic array to record file pointer.
 This array is unique within a single process.
 
 ---- ALGORITHMS ----
@@ -124,7 +124,8 @@ This array is unique within a single process.
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
 
-Sys_Handler call SYS_READ/SYS_WRITE ,then check the file pointer's value.
+User syscall read/write,then the kernel check the interrupt frame's stack pointer.
+If exists,check read/write mode.
 If 0(Read)/1(Write),representing standard io, get the arguments into buffer.
 Otherwise get from file f ,located by fp, and read/write from file. 
 
@@ -135,7 +136,7 @@ Otherwise get from file f ,located by fp, and read/write from file.
 >> for a system call that only copies 2 bytes of data?  Is there room
 >> for improvement in these numbers, and how much?
 
-
+Least: 
 
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
@@ -158,7 +159,19 @@ Wait to be woken up again(time to die).then wake other process and return exit_c
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
 
+We implement two check: check_string and check_sp_args. 
+By checking the address of each elements in user stack,
+These ensure argv and string are loaded successfully into user stack.
+Every time we syscall.Handler will first check the sp's value to determine which syscall is called.
+Suppose we syscall write.The syscall interrupt frame has load the argv.
+Since we have the length of argv,and the address of argv and argv[0] at the bottom where our pointer point at,
+we can get the arguments from *(sp + 1) *(sp + 2) *(sp + 3)
+                              ---fp---  -buffer-  --size--
+Check if file fp pointing at is null, if null, this syscall can't be executed.Exit this thread.
 
+The buffer will be check by file system when read/write.
+Then we just check if loading argv succeed and if the file exists in our file descripter.
+Other syscall are similar.If involved reading string,check address in user stack.If involved file operations, check if file exists.
 
 ---- SYNCHRONIZATION ----
 
