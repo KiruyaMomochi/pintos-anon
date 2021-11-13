@@ -25,8 +25,7 @@ static thread_func start_process NO_RETURN;
 static bool load (char *cmdline, void (**eip) (void), void **esp);
 static void init_process (struct process *p);
 
-/* Convert thread indentifier to process identifier. 
-   TODO: pid <-> tid */
+/* Convert thread indentifier to process identifier. */
 pid_t
 tid_to_pid (tid_t tid)
 {
@@ -34,8 +33,7 @@ tid_to_pid (tid_t tid)
   return tid;
 }
 
-/* Convert process identifier to thread indentifier. 
-   TODO: pid <-> tid */
+/* Convert process identifier to thread indentifier. */
 tid_t
 pid_to_tid (pid_t pid)
 {
@@ -492,6 +490,7 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
 static bool
+
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
               uint32_t read_bytes, uint32_t zero_bytes, bool writable)
 {
@@ -704,9 +703,12 @@ init_process (struct process *p)
   p->fd_count = 2;
   /* Initialize the thread children list. */
   list_init (&(p->chilren));
+
+  sema_init (&(p->rw_sema), 0);
   sema_init (&(p->load_sema), 0);
   sema_init (&(p->wait_sema), 0);
   sema_init (&(p->exit_sema), 0);
+
   p->parent = NULL;
   p->executable = NULL;
 }
@@ -770,7 +772,6 @@ process_get_file (int fd)
   struct process *p = process_current ();
   if (fd < 2 || fd >= p->fd_count)
     return NULL;
-  // TODO: other cases?
 
   ASSERT (fd >= 2 && fd < p->fd_count);
   struct file *file = p->fd_table[fd];

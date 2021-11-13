@@ -408,7 +408,6 @@ static void
 exit (int status)
 {
   /* Set the exit status of the current thread. */
-  // TODO: process_current
   struct process *p = process_current ();
   p->exit_code = status;
 
@@ -455,7 +454,6 @@ exec (const char *cmd_line)
 static int
 wait (pid_t pid)
 {
-  // TODO: Return -1 for invalid pid.
   if (pid == PID_ERROR)
     return -1;
 
@@ -538,15 +536,18 @@ read (int fd, void *buffer, unsigned size)
 static int
 write (int fd, const void *buffer, unsigned size)
 {
+  int write_size;
   check_address (buffer);
 
   // TODO: Use synchronization to ensure that only one thread can write to
   //       the same file at a time.
   // TODO: After add synchronization, we need to release the lock when
   //       the write is not done and process exit abnormally.
+  struct process* p = process_current();
+  sema_up(&(p->rw_sema));
   if (fd == STDOUT_FILENO)
     {
-      return write_stdout (buffer, size);
+      write_size = write_stdout (buffer, size);
     }
   else
     {
@@ -556,8 +557,10 @@ write (int fd, const void *buffer, unsigned size)
           DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[open %d failed]", fd);
           thread_exit ();
         }
-      return file_write (f, buffer, size);
+      write_size = file_write (f, buffer, size);
     }
+  sema_down(&(p->rw_sema));
+  return write_size;
 }
 
 /* Changes the next byte to be read or written in open file FD to
