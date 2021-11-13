@@ -124,7 +124,13 @@ This array is unique within a single process.
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
 
-User syscall read/write,then the kernel check the interrupt frame's stack pointer.
+First we create a empty user page mapped to a kernel page.
+Allocate a new empty kernel page in kernel, and set it mapped with its according user page in user memory.
+If successfully mapped, set esp to target at the physical memory so that kernel can access user memory by access user's interrupt frame.
+
+Then we load the arguments into intr_frame's stack ,according to the ARGUMENT PASSING algorithm.
+After doing this, we are ready to read/write.
+If the arguments syscall read/write, the kernel check the interrupt frame's stack pointer.
 If exists,check read/write mode.
 If 0(Read)/1(Write),representing standard io, get the arguments into buffer.
 Otherwise get from file f ,located by fp, and read/write from file. 
@@ -136,7 +142,16 @@ Otherwise get from file f ,located by fp, and read/write from file.
 >> for a system call that only copies 2 bytes of data?  Is there room
 >> for improvement in these numbers, and how much?
 
-Least: 
+For a full page:the least number is 1 (page's head).
+The page may not be contigous when allocating. 
+If not contigous,the greatest possible num may be 4096.Because it requires us to check every address to be valid in page.
+If contigous,just check 2 num is enough.First get a address in page,then we can check the head of this page since this is contigous.
+Then we know the page is mapped into user space.
+
+For a 2 bytes page:
+Least number is still 1.
+Whatever it is contigous or not, the greatest number is 2 ,since we only gets 2 bytes.
+But for kernel, since we only know where the head of page is , still need to check second address.
 
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
@@ -200,13 +215,15 @@ This ensures no process will terminate until all process has been freed.
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
 
-
+We get page address from user's intr_frame and then get data from this address.
+This method is used only when system calls. 
 
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
 
 Advantage: efficient to fetch every files' address.
 Disadvantage: frequent memory allocation, may waste a large amount of memory.
+
 >> B11: The default tid_t to pid_t mapping is the identity mapping.
 >> If you changed it, what advantages are there to your approach?
 
