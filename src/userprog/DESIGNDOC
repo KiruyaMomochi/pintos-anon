@@ -1,33 +1,3 @@
-
-首页
-探索
-通知
- 创建…
-longqt 个人信息和配置
-group22
-/
-group22
-私有库
-派生自 CS130/pintos-submit-template
-取消关注
-4
-派生
-0
-代码
-版本发布
-动态
- 37 提交
- 5 分支
- 0 Git标签
- 7.9 MiB
- 分支: proj2 
-group22/src/userprog/DESIGNDOC
-359 行
-14 KiB
-原始文件
-永久链接
-Blame
-文件历史
          +--------------------------+
          |          CS 140          |
          | PROJECT 2: USER PROGRAMS |
@@ -147,6 +117,7 @@ struct process
 };
 ```
 
+
 This struct defines a process control block (PCB). It contains the
 information about a process, including its thread, name, PID, exit
 status, file descriptor table, number of open files, parent process,
@@ -162,14 +133,15 @@ struct process_lock
   struct process* holder;
   struct semaphore semaphore;
 };
-static process_lock p_lock;
+
+static struct process_lock p_lock;
 ```
 
-This struct provide a lock for process just like the struct lock used in kernel.
-Used for synchronization in syscall write.
-p_lock is used in syscall.c and initialize when process initialize.
+This struct implement a lock ,similar to lock in kernel space,into user space.
+This p_lock is only used in write. 
 
 > In `thread.h`
+
 ```cpp
 struct thread
 {
