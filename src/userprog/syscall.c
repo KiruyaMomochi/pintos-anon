@@ -3,6 +3,7 @@
 #include "devices/input.h"
 #include "devices/shutdown.h"
 #include "filesys/filesys.h"
+#include "filesys/file.h"
 #include "kernel/debug.h"
 #include "pagedir.h"
 #include "threads/init.h"
@@ -210,6 +211,57 @@ syscall_argc (int syscall_number)
     }
 }
 
+/* Size of arguments of system call. */
+static size_t
+syscall_arg_size (int syscall_number)
+{
+  switch (syscall_number)
+    {
+    case SYS_HALT:
+      return 0;
+    case SYS_EXIT:
+      return sizeof (int);
+    case SYS_EXEC:
+      return sizeof (const char *);
+    case SYS_WAIT:
+      return sizeof (int);
+    case SYS_CREATE:
+      return sizeof (const char *) + sizeof (unsigned);
+    case SYS_REMOVE:
+      return sizeof (const char *);
+    case SYS_OPEN:
+      return sizeof (const char *);
+    case SYS_FILESIZE:
+      return sizeof (int);
+    case SYS_READ:
+      return sizeof (int) + sizeof (void *) + sizeof (unsigned);
+    case SYS_WRITE:
+      return sizeof (int) + sizeof (const void *) + sizeof (unsigned);
+    case SYS_SEEK:
+      return sizeof (int) + sizeof (unsigned);
+    case SYS_TELL:
+      return sizeof (int);
+    case SYS_CLOSE:
+      return sizeof (int);
+    case SYS_MMAP:
+      return sizeof (int) + sizeof (void *);
+    case SYS_MUNMAP:
+      return sizeof (int);
+    case SYS_CHDIR:
+      return sizeof (const char *);
+    case SYS_MKDIR:
+      return sizeof (const char *);
+    case SYS_READDIR:
+      return sizeof (int) + sizeof (void *);
+    case SYS_ISDIR:
+      return sizeof (int);
+    case SYS_INUMBER:
+      return sizeof (int);
+    default:
+      return 0;
+    }
+}
+
 /* Exit if the system call sp or the argument is invalid. */
 static void
 check_sp_and_arg (int *sp)
@@ -219,8 +271,7 @@ check_sp_and_arg (int *sp)
   for (size_t i = 0; i < sizeof (sp); i++)
     check_address (++arg);
 
-  size_t arg_size = syscall_argc (get_user ((const uint8_t *)sp));
-  // DEBUG_THREAD ("%p %d", arg, arg_size);
+  size_t arg_size = syscall_arg_size (get_user ((const uint8_t *)sp));
 
   for (size_t i = 0; i < arg_size; i++)
     check_address (++arg);
