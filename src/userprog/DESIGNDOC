@@ -1,15 +1,45 @@
-		     +--------------------------+
-       	       	     |		CS 140		|
-		     | PROJECT 2: USER PROGRAMS	|
-		     | 	   DESIGN DOCUMENT     	|
-		     +--------------------------+
+
+首页
+探索
+通知
+ 创建…
+longqt 个人信息和配置
+group22
+/
+group22
+私有库
+派生自 CS130/pintos-submit-template
+取消关注
+4
+派生
+0
+代码
+版本发布
+动态
+ 37 提交
+ 5 分支
+ 0 Git标签
+ 7.9 MiB
+ 分支: proj2 
+group22/src/userprog/DESIGNDOC
+359 行
+14 KiB
+原始文件
+永久链接
+Blame
+文件历史
+         +--------------------------+
+         |          CS 140          |
+         | PROJECT 2: USER PROGRAMS |
+         |      DESIGN DOCUMENT     |
+         +--------------------------+
 
 ---- GROUP22 ----
 
 >> Fill in the names and email addresses of your group members.
 
-Qitan Long <longqt@shanghaitech.edu.cn>
-Haotian Jing <jinght@shanghaitech.edu.cn>
+Qitan Long <longqt@shanghaitech.edu.cn> - documention and code
+Haotian Jing <jinght@shanghaitech.edu.cn> - design and code
 
 ---- PRELIMINARIES ----
 
@@ -20,8 +50,12 @@ Haotian Jing <jinght@shanghaitech.edu.cn>
 >> preparing your submission, other than the Pintos documentation, course
 >> text, lecture notes, and course staff.
 
-			   ARGUMENT PASSING
-			   ================
+- Linux kernel source code
+- `color.h` file comes from <https://gist.github.com/RabaDabaDoba/145049536f815903c79944599c6f952a>,
+  we use it to color the output of debug message.
+
+         ARGUMENT PASSING
+         ================
 
 ---- DATA STRUCTURES ----
 
@@ -29,14 +63,40 @@ Haotian Jing <jinght@shanghaitech.edu.cn>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+We didn't declare any new struct or variable in this part.
+
 ---- ALGORITHMS ----
 
 >> A2: Briefly describe how you implemented argument parsing.  How do
 >> you arrange for the elements of argv[] to be in the right order?
 >> How do you avoid overflowing the stack page?
 
-Add the arguments downward,then add their addresses from the last one to the first.
-Push the address of argv and argc representing the length of argv[] at the end of the stack.
+Add the arguments downward, then add their addresses from the first
+one to the last. Push the address of argv and argc representing the
+length of argv[] at the end of the stack.
+
+We use a stack so it will "just in right order". The limitaion is 
+that
+
+1. We need to push argument strings in reverse order.
+2. We cannot control the size of the stack easily, however, if the
+   stack overflows, `magic` number in `struct thread' will be
+   corrupted and we get kernel panic.
+
+Address     Name          Data        Type
+0xbffffffc  argv[0][...]  bar\0       char[8]
+0xbffffff8  argv[1][...]  foo\0       char[3]
+0xbffffff5  argv[2][...]  -l\0        char[4]
+0xbfffffed  argv[3][...]  /bin/ls\0   char[4]
+0xbfffffec  word-align    0           uint8_t
+0xbfffffe8  argv[4]       0           char *
+0xbfffffe4  argv[3]       0xbffffffc  char *
+0xbfffffe0  argv[2]       0xbffffff8  char *
+0xbfffffdc  argv[1]       0xbffffff5  char *
+0xbfffffd8  argv[0]       0xbfffffed  char *
+0xbfffffd4  argv          0xbfffffd8  char **
+0xbfffffd0  argc          4           int
+0xbfffffcc  return addr   0           void (*) ()
 
 ---- RATIONALE ----
 
@@ -51,8 +111,8 @@ Protect from multiple access by different process.
 Prevent user from direct calling kernel function.
 
 
-			     SYSTEM CALLS
-			     ============
+           SYSTEM CALLS
+           ============
 
 ---- DATA STRUCTURES ----
 
@@ -60,6 +120,9 @@ Prevent user from direct calling kernel function.
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+> In `process.h`
+
+```cpp
 struct process
 {
   struct thread *thread;
@@ -82,9 +145,32 @@ struct process
 
   struct file *executable; /* Executable file. */
 };
+```
 
-Illusion of process.
+This struct defines a process control block (PCB). It contains the
+information about a process, including its thread, name, PID, exit
+status, file descriptor table, number of open files, parent process,
+children list, whether the process was loaded successfully, loading
+semaphore, waiting semaphore, and exiting semaphore. It also contains
+the executable file to keep it open and deny write.
 
+> In `process.h`
+```cpp
+ /* Lock for read/write */
+struct process_lock
+{
+  struct process* holder;
+  struct semaphore semaphore;
+};
+static process_lock p_lock;
+```
+
+This struct provide a lock for process just like the struct lock used in kernel.
+Used for synchronization in syscall write.
+p_lock is used in syscall.c and initialize when process initialize.
+
+> In `thread.h`
+```cpp
 struct thread
 {
   /* Owned by thread.c. */
@@ -101,21 +187,35 @@ struct thread
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
   uint32_t *pagedir; /* Page directory. */
-  + struct process *process;
++ struct process *process;
 #endif
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
 };
+```
 
 Add the thread's corresponding process. 
+
+> In `syscall.h`
+
+```cpp
+/* Size of bytes to write one time. */
+#define WRITE_BUF_SIZE 512
+```
+
+It saves the size of bytes to write one time. As described in the
+documentation of `write()`, we write one time `WRITE_BUF_SIZE` bytes
+to console.
 
 >> B2: Describe how file descriptors are associated with open files.
 >> Are file descriptors unique within the entire OS or just within a
 >> single process?
 
 We use a dynamic array to record file pointer.
-This array is unique within a single process.
+
+This array is unique within a single process, and increase automatically
+when a new file is opened.
 
 ---- ALGORITHMS ----
 
@@ -123,15 +223,18 @@ This array is unique within a single process.
 >> kernel.
 
 First we create a empty user page mapped to a kernel page.
-Allocate a new empty kernel page in kernel, and set it mapped with its according user page in user memory.
-If successfully mapped, set esp to target at the physical memory so that kernel can access user memory by access user's interrupt frame.
 
-Then we load the arguments into intr_frame's stack ,according to the ARGUMENT PASSING algorithm.
-After doing this, we are ready to read/write.
-If the arguments syscall read/write, the kernel check the interrupt frame's stack pointer.
-If exists,check read/write mode.
-If 0(Read)/1(Write),representing standard io, get the arguments into buffer.
-Otherwise get from file f ,located by fp, and read/write from file. 
+Allocate a new empty kernel page in kernel, and set it mapped with its
+according user page in user memory. If successfully mapped, set esp to
+target at the physical memory so that kernel can access user memory by
+access user's interrupt frame.
+
+Then we load the arguments into intr_frame's stack, according to the 
+ARGUMENT PASSING algorithm. After doing this, we are ready to read/write.
+If the arguments syscall read/write, the kernel check the interrupt
+frame's stack pointer. If exists, check read/write mode. If 0(Read)/1(Write), 
+representing standard io, get the arguments into buffer. Otherwise get from
+file f, located by fp, and read/write from file. 
 
 >> B4: Suppose a system call causes a full page (4,096 bytes) of data
 >> to be copied from user space into the kernel.  What is the least
@@ -140,23 +243,29 @@ Otherwise get from file f ,located by fp, and read/write from file.
 >> for a system call that only copies 2 bytes of data?  Is there room
 >> for improvement in these numbers, and how much?
 
-For a full page:the least number is 1 (page's head).
-The page may not be contigous when allocating. 
-If not contigous,the greatest possible num may be 4096.Because it requires us to check every address to be valid in page.
-If contigous,just check 2 num is enough.First get a address in page,then we can check the head of this page since this is contigous.
-Then we know the page is mapped into user space.
+> For a full page: 
 
-For a 2 bytes page:
+the least number is 1 (page's head). The page may not be contigous
+when allocating. If not contigous, the greatest possible num may 
+be 4096. Because it requires us to check every address to be valid 
+in page. If contigous, just check 2 num is enough. First get a 
+address in page,then we can check the head of this page since this
+is contigous. Then we know the page is mapped into user space.
+
+> For a 2 bytes page:
+
 Least number is still 1.
-Whatever it is contigous or not, the greatest number is 2 ,since we only gets 2 bytes.
-But for kernel, since we only know where the head of page is , still need to check second address.
+Whatever it is contigous or not, the greatest number is 2. Since we 
+only gets 2 bytes. But for kernel, since we only know where the head
+of page is, still need to check second address.
 
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
 
-Every call for wait by a process sema_down its wait_sema.
-When this process is scheduled to run again(now thread is dying), store exit_code and wake other process.
-Wait to be woken up again(time to die).then wake other process and return exit_code;
+Every call for wait by a process `sema_down()` its `wait_sema`.
+When this process is scheduled to run again and is dying,
+store `exit_code` and wake other process. Wait to be woken up again
+(time to die). Then wake other process and return exit_code.
 
 >> B6: Any access to user program memory at a user-specified address
 >> can fail due to a bad pointer value.  Such accesses must cause the
@@ -172,19 +281,25 @@ Wait to be woken up again(time to die).then wake other process and return exit_c
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
 
-We implement two check: check_string and check_sp_args. 
-By checking the address of each elements in user stack,
-These ensure argv and string are loaded successfully into user stack.
-Every time we syscall.Handler will first check the sp's value to determine which syscall is called.
-Suppose we syscall write.The syscall interrupt frame has load the argv.
-Since we have the length of argv,and the address of argv and argv[0] at the bottom where our pointer point at,
-we can get the arguments from *(sp + 1) *(sp + 2) *(sp + 3)
-                              ---fp---  -buffer-  --size--
-Check if file fp pointing at is null, if null, this syscall can't be executed.Exit this thread.
+We implement two check: `check_string` and `check_sp_and_arg`. 
+By checking the address of each elements in user stack, we ensure 
+arguments and string are loaded successfully into user stack. Every
+time we syscall, handler will first check the `sp`'s value to determine
+which syscall is called.
+
+Suppose we syscall write. The syscall interrupt frame has load the
+`esp`. And from `esp` we know it's `write()` syscall. Then we can
+have the length of arguments, and get the arguments from `*(sp + 1)`,
+`*(sp + 2)`, `*(sp + 3)`, etc.
+
+For this `write()` syscall, we also check if file fd is invalid.
+If invalid, this syscall can't be executed. And exit with code `-1`.
 
 The buffer will be check by file system when read/write.
-Then we just check if loading argv succeed and if the file exists in our file descripter.
-Other syscall are similar.If involved reading string,check address in user stack.If involved file operations, check if file exists.
+Then we just check if loading argv succeed and if the file exists in
+our file descripter. Other syscall are similar. If involved reading
+string, check address in user stack. If involved file operations,
+check if file exists.
 
 ---- SYNCHRONIZATION ----
 
@@ -193,7 +308,8 @@ Other syscall are similar.If involved reading string,check address in user stack
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
 
-We wake other processes and sleep this process.If this process is still woken up, return PID_ERRORs.
+We wake other processes and sleep this process.
+If this process is still woken up, return PID_ERRORs.
 
 >> B8: Consider parent process P with child process C.  How do you
 >> ensure proper synchronization and avoid race conditions when P
@@ -202,19 +318,37 @@ We wake other processes and sleep this process.If this process is still woken up
 >> terminates without waiting, before C exits?  After C exits?  Are
 >> there any special cases?
 
-When a process exits with parent, it wakes up other process and then sleep.
-This ensures no race condition between P and C.(They wait until all process are waiting to exit)
-When it woken up again, delete itself from child_list and free its file descripters and its pointers to parent.
-Then wait until other parent processes to be freed.
-This ensures no process will terminate until all process has been freed.
+We ensure no race condition between P and C by using semaphore
+multiple times like a barrier.
+
+| P                             | C                              |
+| sema_down (&c->wait_sema);    | sema_up (&c->wait_sema);       |
+| get C's exit code;            |                                |
+| sema_up (&c->exit_sema);      | sema_down (&c->exit_sema);     |
+|                               | remove from P's list           |
+|                               | close all opened files         |
+|                               | free resources                 |
+| sema_down (&c->wait_sema);    | sema_up (&c->wait_sema);       |
+| sema_up (&c->exit_sema);      | sema_down (&c->exit_sema);     |
+|                               | free process                   |
+
+When a process with parent exits, it try to wake parent and then
+sleep, waiting for being waken by parent again. When child process up
+again, delete itself from child_list and free its file descripters
+and its pointers to parent. Then parent processes finish it's wait.
+This ensures no process will terminate until all resources has
+been freed.
+
+Also, child process should check if parent has exited. If true,
+it does not need to wait.
 
 ---- RATIONALE ----
 
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
 
-We get page address from user's intr_frame and then get data from this address.
-This method is used only when system calls. 
+We get page address from user's intr_frame and then get data from this
+address. This method is used only when system calls. 
 
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
@@ -225,10 +359,12 @@ Disadvantage: frequent memory allocation, may waste a large amount of memory.
 >> B11: The default tid_t to pid_t mapping is the identity mapping.
 >> If you changed it, what advantages are there to your approach?
 
-Did not change, a tid represent a pid.
+We did not change, a tid represent a pid.
+We can implement `pid_to_tid` and `tid_to_pid` to implement a more
+advanced mapping.
 
-			   SURVEY QUESTIONS
-			   ================
+         SURVEY QUESTIONS
+         ================
 
 Answering these questions is optional, but it will help us improve the
 course in future quarters.  Feel free to tell us anything you
@@ -239,14 +375,29 @@ the quarter.
 >> In your opinion, was this assignment, or any one of the three problems
 >> in it, too easy or too hard?  Did it take too long or too little time?
 
+It's fine.
+
 >> Did you find that working on a particular part of the assignment gave
 >> you greater insight into some aspect of OS design?
+
+Yes. By implementing syscall handler, we have better understanding of
+why OS is designed like this.
 
 >> Is there some particular fact or hint we should give students in
 >> future quarters to help them solve the problems?  Conversely, did you
 >> find any of our guidance to be misleading?
 
+In "3.3.5 Denying Writes to Executables", we should give user hint that
+
+1. `file_deny_write()` and `file_allow_write()` are for `struct file*`.
+2. The file is denying write as long as it's open by at least one 
+   `struct file*` with `deny_write`.
+
 >> Do you have any suggestions for the TAs to more effectively assist
 >> students, either for future quarters or the remaining projects?
 
+No for now.
+
 >> Any other comments?
+
+No.

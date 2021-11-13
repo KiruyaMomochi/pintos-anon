@@ -9,7 +9,7 @@
 void
 test_main (void) 
 {
-  pid_t child = exec ("child-simple");
-  msg ("wait(exec()) = %d", wait (child));
-  msg ("wait(exec()) = %d", wait (child));
+  pid_t child_1 = exec ("child-simple");
+  msg ("wait(exec()) = %d", wait (child_1));
+  msg ("wait(exec()) = %d", wait (child_1));
 }

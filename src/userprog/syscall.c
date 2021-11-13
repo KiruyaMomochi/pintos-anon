@@ -44,6 +44,7 @@ static void close (int fd);
 #define DEBUG_PRINT_SYSCALL_END(...)
 #endif
 
+
 /* Registers handlers for system call. */
 void
 syscall_init (void)
@@ -539,12 +540,8 @@ write (int fd, const void *buffer, unsigned size)
   int write_size;
   check_address (buffer);
 
-  // TODO: Use synchronization to ensure that only one thread can write to
-  //       the same file at a time.
-  // TODO: After add synchronization, we need to release the lock when
-  //       the write is not done and process exit abnormally.
   struct process* p = process_current();
-  sema_up(&(p->rw_sema));
+  process_lock_acquire(&p_lock);
   if (fd == STDOUT_FILENO)
     {
       write_size = write_stdout (buffer, size);
@@ -559,7 +556,7 @@ write (int fd, const void *buffer, unsigned size)
         }
       write_size = file_write (f, buffer, size);
     }
-  sema_down(&(p->rw_sema));
+  process_lock_release(&p_lock);
   return write_size;
 }
 

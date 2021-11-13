@@ -665,6 +665,7 @@ process_init (void)
 
   struct thread *t = thread_current ();
   struct process *p = process_create (t);
+
   if (p == NULL)
     PANIC ("Failed to init process");
 }
@@ -704,7 +705,7 @@ init_process (struct process *p)
   /* Initialize the thread children list. */
   list_init (&(p->chilren));
 
-  sema_init (&(p->rw_sema), 0);
+  process_lock_init(&p_lock);
   sema_init (&(p->load_sema), 0);
   sema_init (&(p->wait_sema), 0);
   sema_init (&(p->exit_sema), 0);
@@ -788,4 +789,37 @@ process_free_fd (int fd)
   ASSERT (fd >= 2 && fd < p->fd_count);
   ASSERT (p->fd_table[fd] != NULL);
   p->fd_table[fd] = NULL;
+}
+
+bool
+process_lock_init (struct process_lock *p_lock)
+{
+  if(p_lock == NULL)
+    return false; 
+  p_lock->holder = NULL;
+  sema_init (&p_lock->semaphore, 1);
+  return true;
+}
+bool
+process_lock_acquire (struct process_lock *p_lock)
+{
+  if(p_lock == NULL)
+    return false;
+  if (p_lock->holder != process_current())
+    return false;
+
+  sema_down (&p_lock->semaphore);
+  p_lock->holder = process_current ();
+  return true;
+}
+bool
+process_lock_release (struct process_lock *p_lock)
+{
+  if(p_lock == NULL)
+    return false;
+  if (p_lock->holder != process_current())
+    return false;
+  p_lock->holder = NULL;
+  sema_up (&p_lock->semaphore);
+  return true;
 }
