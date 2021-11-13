@@ -54,10 +54,10 @@ that
    corrupted and we get kernel panic.
 
 Address     Name          Data        Type
-0xbffffffc  argv[0][...]  bar\0       char[4]
-0xbffffff8  argv[1][...]  foo\0       char[4]
-0xbffffff5  argv[2][...]  -l\0        char[3]
-0xbfffffed  argv[3][...]  /bin/ls\0   char[8]
+0xbffffffc  argv[0][...]  bar\0       char[8]
+0xbffffff8  argv[1][...]  foo\0       char[3]
+0xbffffff5  argv[2][...]  -l\0        char[4]
+0xbfffffed  argv[3][...]  /bin/ls\0   char[4]
 0xbfffffec  word-align    0           uint8_t
 0xbfffffe8  argv[4]       0           char *
 0xbfffffe4  argv[3]       0xbffffffc  char *
