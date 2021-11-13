@@ -3,6 +3,7 @@
 #include "devices/input.h"
 #include "devices/shutdown.h"
 #include "filesys/filesys.h"
+#include "filesys/file.h"
 #include "kernel/debug.h"
 #include "pagedir.h"
 #include "threads/init.h"
