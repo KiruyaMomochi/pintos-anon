@@ -16,8 +16,6 @@ struct process
   pid_t pid;     /* Process Id */
   int exit_code; /* Exit status. */
 
-  // TODO: Should we optmize this? Should this be a list?
-  // TODO: Should we use a struct? Or a hash table?
   struct file **fd_table; /* File descriptor table. */
   int fd_count;           /* Number of open files. */
 
@@ -26,6 +24,8 @@ struct process
   struct list_elem child_elem; /* List element for children list. */
 
   bool load_success; /* Whether the process was loaded successfully. */
+
+  struct semaphore rw_sema; /* Semaphore for read/write */
   struct semaphore load_sema; /* Semaphore for loading. */
   struct semaphore wait_sema; /* Semaphore for waiting. */
   struct semaphore exit_sema; /* Semaphore for exiting. */
