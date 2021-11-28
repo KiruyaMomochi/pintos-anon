@@ -16,6 +16,9 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 
+// TODO: Use this lock to keep synchronization
+static struct lock filesys_lock; /* Lock for file system operations */
+
 static void syscall_handler (struct intr_frame *);
 static void halt (void) NO_RETURN;
 static void exit (int status) NO_RETURN;
@@ -45,12 +48,12 @@ static void close (int fd);
 #define DEBUG_PRINT_SYSCALL_END(...)
 #endif
 
-
-/* Registers handlers for system call. */
+/* Registers handlers for system call. Also init filesys_lock here. */
 void
 syscall_init (void)
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+  lock_init (&filesys_lock);
 }
 
 /* Reads a byte at user virtual address UADDR.
@@ -592,7 +595,6 @@ write (int fd, const void *buffer, unsigned size)
   check_address (buffer);
 
   struct process* p = process_current();
-  process_lock_acquire(&p_lock);
   if (fd == STDOUT_FILENO)
     {
       write_size = write_stdout (buffer, size);
@@ -607,7 +609,6 @@ write (int fd, const void *buffer, unsigned size)
         }
       write_size = file_write (f, buffer, size);
     }
-  process_lock_release(&p_lock);
   return write_size;
 }
 

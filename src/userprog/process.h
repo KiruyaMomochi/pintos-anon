@@ -8,9 +8,6 @@ typedef int pid_t;
 #include "threads/thread.h"
 #include "threads/synch.h"
 
-struct process;
-struct process_lock;
-
 struct process
 {
   struct thread *thread;
@@ -34,12 +31,6 @@ struct process
 
   struct file *executable; /* Executable file. */
 };
- /* Lock for read/write */
-struct process_lock
-{
-  struct process* holder;
-  struct semaphore semaphore;
-};
 
 tid_t process_execute (const char *file_name);
 int process_wait (tid_t);
@@ -58,12 +49,7 @@ struct file *process_get_file (int);
 void process_free_fd (int fd);
 struct process * process_find (pid_t pid);
 
-bool process_lock_init (struct process_lock *p_lock);
-bool process_lock_acquire (struct process_lock *p_lock);
-bool process_lock_release (struct process_lock *p_lock);
 pid_t tid_to_pid (tid_t tid);
 tid_t pid_to_tid (pid_t pid);
-
-static struct process_lock p_lock;
 
 #endif /* userprog/process.h */

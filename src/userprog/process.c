@@ -41,7 +41,6 @@ pid_to_tid (pid_t pid)
   return pid;
 }
 
-
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -120,7 +119,7 @@ int
 process_wait (tid_t child_tid)
 {
   // HACK: tid = pid so
-  pid_t pid = tid_to_pid(child_tid);
+  pid_t pid = tid_to_pid (child_tid);
   struct process *p = process_find (pid);
   if (p == NULL)
     return -1;
@@ -705,7 +704,6 @@ init_process (struct process *p)
   /* Initialize the thread children list. */
   list_init (&(p->chilren));
 
-  process_lock_init(&p_lock);
   sema_init (&(p->load_sema), 0);
   sema_init (&(p->wait_sema), 0);
   sema_init (&(p->exit_sema), 0);
@@ -789,37 +787,4 @@ process_free_fd (int fd)
   ASSERT (fd >= 2 && fd < p->fd_count);
   ASSERT (p->fd_table[fd] != NULL);
   p->fd_table[fd] = NULL;
-}
-
-bool
-process_lock_init (struct process_lock *p_lock)
-{
-  if(p_lock == NULL)
-    return false; 
-  p_lock->holder = NULL;
-  sema_init (&p_lock->semaphore, 1);
-  return true;
-}
-bool
-process_lock_acquire (struct process_lock *p_lock)
-{
-  if(p_lock == NULL)
-    return false;
-  if (p_lock->holder != process_current())
-    return false;
-
-  sema_down (&p_lock->semaphore);
-  p_lock->holder = process_current ();
-  return true;
-}
-bool
-process_lock_release (struct process_lock *p_lock)
-{
-  if(p_lock == NULL)
-    return false;
-  if (p_lock->holder != process_current())
-    return false;
-  p_lock->holder = NULL;
-  sema_up (&p_lock->semaphore);
-  return true;
 }
