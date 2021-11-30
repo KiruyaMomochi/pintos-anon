@@ -12,7 +12,7 @@ void debug_print (const char *file, int line, const char *func, const char *fmt,
 #define DEBUG_THREAD_T(t, fmt, ...)
 #define DEBUG_THREAD(fmt, ...)
 #define DEBUG_PRINT(fmt, ...)
-#define ASSERT(CONDITION) ((void) 0);
+// #define ASSERT(CONDITION) ((void) 0);
 #endif
 
 #endif
