@@ -663,9 +663,9 @@ process_init (void)
   ASSERT (intr_get_level () == INTR_OFF);
 
   struct thread *t = thread_current ();
-  struct process *p = process_create (t);
+  pid_t p = process_create (t);
 
-  if (p == NULL)
+  if (p == PID_ERROR)
     PANIC ("Failed to init process");
 }
 
