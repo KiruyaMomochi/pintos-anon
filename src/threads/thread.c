@@ -201,8 +201,8 @@ thread_create (const char *name, int priority, thread_func *function,
 
 #ifdef USERPROG
   /* Create process. */
-  struct process *p = process_create (t);
-  if (p == NULL)
+  pid_t p = process_create (t);
+  if (p == TID_ERROR)
     return TID_ERROR;
 #endif
 
