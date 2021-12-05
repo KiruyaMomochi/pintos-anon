@@ -6,7 +6,7 @@ void debug_print (const char *file, int line, const char *func, const char *fmt,
 
 #ifdef DEBUG_KERNEL
 #define DEBUG_THREAD_T(t, fmt, ...) debug_thread (t, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
-#define DEBUG_THREAD(fmt, ...) debug_thread (thread_current(), __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
+#define DEBUG_THREAD(fmt, ...) debug_thread ((void *) thread_current(), __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 #define DEBUG_PRINT(fmt, ...) debug_print (__FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 #else
 #define DEBUG_THREAD_T(t, fmt, ...)
