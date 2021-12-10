@@ -144,6 +144,8 @@ page_fault (struct intr_frame *f)
 
   /* Count page faults. */
   page_fault_cnt++;
+  if (page_fault_cnt > 10000)
+    PANIC ("Too many page faults");
 
   /* Determine cause. */
   not_present = (f->error_code & PF_P) == 0;
