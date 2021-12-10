@@ -1,11 +1,15 @@
 #include "userprog/exception.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
 #include "userprog/gdt.h"
+#include "userprog/pagedir.h"
+#include "userprog/process.h"
 #include "utils/colors.h"
+#include "vm/page.h"
 #include <inttypes.h>
-#include <stdio.h>
 #include <kernel/debug.h>
+#include <stdio.h>
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -110,6 +114,17 @@ kill (struct intr_frame *f)
     }
 }
 
+/* Returns true if ESP and FAULT_ADDR are considered to be valid
+   values for a stack fault.  */
+static bool
+is_stack (void *esp, void *fault_addr)
+{
+  if (esp <= USER_STACK_BOTTOM || fault_addr <= USER_STACK_BOTTOM)
+    return false;
+
+  return (fault_addr >= esp - 32 && fault_addr < PHYS_BASE);
+}
+
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.
@@ -159,15 +174,23 @@ page_fault (struct intr_frame *f)
                fault_addr, not_present ? "not present" : "rights violation",
                write ? "writing" : "reading", user ? "user" : "kernel");
 
+  /* Always fail if rights violation occurs. */
+  if (!not_present)
+    goto fail;
+
+
   if (!user)
     {
+      DEBUG_PRINT (COLOR_MAG "Kernel page fault.");
+
       /* Set eip to eax value */
       f->eip = (void *)f->eax;
       /* Set eax to 0xffffffff to indicate page fault. */
       f->eax = 0xffffffff;
+
+      return;
     }
-  else
-    {
-       thread_exit ();
-    }
+
+  DEBUG_PRINT (COLOR_MAG "User page fault.");
+  thread_exit ();
 }
