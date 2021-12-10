@@ -64,4 +64,18 @@ struct supp_table
 
 void supp_init (struct supp_table *table);
 
+/* Property accessors. */
+
+bool supp_is_code (struct supp_entry *entry);
+bool supp_is_mmap (struct supp_entry *entry);
+bool supp_is_file (struct supp_entry *entry);
+bool supp_is_normal (struct supp_entry *entry);
+bool supp_is_zero (struct supp_entry *entry);
+bool supp_is_loaded (struct supp_entry *entry);
+bool supp_is_not_loaded (struct supp_entry *entry);
+bool supp_is_swapped (struct supp_entry *entry);
+bool supp_is_pinned (struct supp_entry *entry);
+bool supp_is_dirty (struct supp_entry *entry);
+bool supp_is_accessed (struct supp_entry *entry);
+
 #endif // VM_PAGE_H
