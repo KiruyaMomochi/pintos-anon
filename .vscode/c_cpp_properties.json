@@ -23,7 +23,25 @@
             "cStandard": "c17",
             "cppStandard": "c++14",
             "defines": [
-                "USERPROG"
+                "USERPROG",
+                "FILESYS"
+            ]
+        },
+        {
+            "name": "VM",
+            "includePath": [
+                "${default}",
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/src/lib",
+                "${workspaceFolder}/src/lib/kernel",
+                "${workspaceFolder}/src/lib/user"
+            ],
+            "cStandard": "c17",
+            "cppStandard": "c++14",
+            "defines": [
+                "USERPROG",
+                "FILESYS",
+                "VM"
             ]
         }
     ],

@@ -5,15 +5,34 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(gdb) 起動",
+            "name": "(gdb) threads 起動",
             "type": "cppdbg",
             "request": "launch",
             "miDebuggerServerAddress": "127.0.0.1:1234",
             "program": "${workspaceFolder}/src/threads/build/kernel.o",
             "args": [],
             "stopAtEntry": false,
-            // "cwd": "${fileDirname}",
             "cwd": "${workspaceFolder}/src/threads/build",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "gdb の再フォーマットを有効にする",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": false
+                }
+            ]
+        },
+        {
+            "name": "(gdb) vm 起動",
+            "type": "cppdbg",
+            "request": "launch",
+            "miDebuggerServerAddress": "127.0.0.1:1234",
+            "program": "${workspaceFolder}/src/vm/build/kernel.o",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/src/vm/build",
             "environment": [],
             "externalConsole": false,
             "MIMode": "gdb",
