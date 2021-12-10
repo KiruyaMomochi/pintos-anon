@@ -182,6 +182,25 @@ page_fault (struct intr_frame *f)
   if (is_user_vaddr (fault_addr) && supp_handle_page_fault (fault_page))
     return;
 
+  struct thread *t = thread_current ();
+  if (user && is_stack (f->esp, fault_addr))
+    {
+      DEBUG_PRINT ("Stack page fault, allocating new. esp: %p, fault_addr: %p",
+                   f->esp, fault_addr);
+      if (allocate_stack (fault_page, false))
+        return;
+
+      DEBUG_PRINT (COLOR_MAG "Failed to allocate stack page.");
+    }
+  else if (!user && t->process != NULL
+           && is_stack (t->process->esp, fault_addr))
+    {
+      DEBUG_PRINT (COLOR_MAG "Actually it's stack is %p.", t->process->esp);
+      if (allocate_stack (fault_page, false))
+        return;
+
+      DEBUG_PRINT (COLOR_MAG "Failed to allocate stack page.");
+    }
 
 fail:
   if (write)

@@ -49,13 +49,14 @@ void process_init (void);
 const char *process_name (void);
 
 struct process *process_current (void);
-
 pid_t process_create (struct thread *t);
+struct process *process_find (pid_t pid);
 
-int process_allocate_fd (struct file *);
-struct file *process_get_file (int);
-void process_free_fd (int fd);
-struct process * process_find (pid_t pid);
+bool allocate_stack (void *upage, bool zero);
+
+
+bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
+                   uint32_t read_bytes, uint32_t zero_bytes, bool writable);
 
 pid_t tid_to_pid (tid_t tid);
 tid_t pid_to_tid (pid_t pid);
