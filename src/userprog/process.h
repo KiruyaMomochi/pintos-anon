@@ -5,6 +5,13 @@
 typedef int pid_t;
 #define PID_ERROR ((pid_t)-1)
 
+
+#include "threads/vaddr.h"
+
+/* 8 MB of user stack. */
+#define USER_STACK_SIZE (8 * 1024 * 1024)
+#define USER_STACK_BOTTOM (PHYS_BASE - USER_STACK_SIZE)
+
 #include "threads/synch.h"
 #include "threads/thread.h"
 extern struct lock filesys_lock;

@@ -305,6 +305,8 @@ static void
 syscall_handler (struct intr_frame *f)
 {
   int *sp = f->esp;
+  process_current ()->esp = f->esp;
+
   uint32_t ret = 0;
 
   check_sp_and_arg (sp);
