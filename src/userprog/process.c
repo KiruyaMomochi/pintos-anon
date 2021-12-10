@@ -764,6 +764,10 @@ init_process (struct process *p)
   /* Set the initial file descriptor table size to 2 because
     stdin and stdout are reserved. */
   p->fd_count = 2;
+
+  p->mmap_table = NULL;
+  p->mmap_count = 1;
+
   /* Initialize the thread children list. */
   list_init (&(p->chilren));
 
