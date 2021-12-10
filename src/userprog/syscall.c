@@ -280,6 +280,8 @@ check_sp_and_arg (int *sp)
     check_address (++arg);
 }
 
+/* Returns true if SYSCALL_NUMBER is a syscall for
+   file operations. */
 static bool
 syscall_is_file_op (int syscall_number)
 {
