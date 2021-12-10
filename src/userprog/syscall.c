@@ -280,6 +280,26 @@ check_sp_and_arg (int *sp)
     check_address (++arg);
 }
 
+static bool
+syscall_is_file_op (int syscall_number)
+{
+  switch (syscall_number)
+    {
+    case SYS_CREATE:
+    case SYS_REMOVE:
+    case SYS_OPEN:
+    case SYS_FILESIZE:
+    case SYS_READ:
+    case SYS_WRITE:
+    case SYS_SEEK:
+    case SYS_TELL:
+    case SYS_CLOSE:
+      return true;
+    default:
+      return false;
+    }
+}
+
 /* Handle syscals and also check if inputs are correct */
 static void
 syscall_handler (struct intr_frame *f)
@@ -289,6 +309,11 @@ syscall_handler (struct intr_frame *f)
 
   check_sp_and_arg (sp);
   const char *syscall = syscall_name (*sp);
+
+  bool fileop = syscall_is_file_op (*sp);
+
+  if (fileop)
+    lock_acquire (&filesys_lock);
 
   switch (*sp)
     {
@@ -412,8 +437,10 @@ syscall_handler (struct intr_frame *f)
       break;
     }
 
+  if (fileop)
+    lock_release (&filesys_lock);
+
   f->eax = ret;
-  // thread_exit ();
 }
 
 /* Terminates Pintos by calling shutdown_power_off() (declared in
@@ -594,7 +621,6 @@ write (int fd, const void *buffer, unsigned size)
   int write_size;
   check_address (buffer);
 
-  struct process* p = process_current();
   if (fd == STDOUT_FILENO)
     {
       write_size = write_stdout (buffer, size);

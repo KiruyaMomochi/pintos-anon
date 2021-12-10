@@ -5,8 +5,9 @@
 typedef int pid_t;
 #define PID_ERROR ((pid_t)-1)
 
-#include "threads/thread.h"
 #include "threads/synch.h"
+#include "threads/thread.h"
+extern struct lock filesys_lock;
 
 struct process
 {

@@ -25,6 +25,11 @@ static thread_func start_process NO_RETURN;
 static bool load (char *cmdline, void (**eip) (void), void **esp);
 static void init_process (struct process *p);
 
+/* File system lock.
+   Acquire this lock before accessing the file system to prevent
+   synchronization issues. */
+struct lock filesys_lock;
+
 /* Convert thread indentifier to process identifier. */
 pid_t
 tid_to_pid (tid_t tid)
@@ -139,6 +144,10 @@ void
 process_exit (void)
 {
   struct thread *t = thread_current ();
+
+  if (lock_held_by_current_thread (&filesys_lock))
+    lock_release (&filesys_lock);
+
   struct process *p = t->process;
   uint32_t *pd;
 
@@ -327,7 +336,10 @@ load (char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (program_name);
+  /* This two must be the same since we read the file lazily */
+  lock_acquire (&filesys_lock);
+  p->executable = file = filesys_open (program_name);
+  lock_release (&filesys_lock);
 
   if (file == NULL)
     {
@@ -335,6 +347,7 @@ load (char *file_name, void (**eip) (void), void **esp)
       goto done;
     }
 
+  lock_acquire (&filesys_lock);
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7) || ehdr.e_type != 2
@@ -344,6 +357,9 @@ load (char *file_name, void (**eip) (void), void **esp)
       printf ("load: %s: error loading executable\n", file_name);
       goto done;
     }
+  lock_release (&filesys_lock);
+
+  DEBUG_THREAD ("%s: loading executable", file_name);
 
   /* Read program headers. */
   file_ofs = ehdr.e_phoff;
@@ -351,12 +367,15 @@ load (char *file_name, void (**eip) (void), void **esp)
     {
       struct Elf32_Phdr phdr;
 
+      lock_acquire (&filesys_lock);
       if (file_ofs < 0 || file_ofs > file_length (file))
         goto done;
       file_seek (file, file_ofs);
 
       if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
         goto done;
+      lock_release (&filesys_lock);
+
       file_ofs += sizeof phdr;
       switch (phdr.p_type)
         {
@@ -415,13 +434,16 @@ load (char *file_name, void (**eip) (void), void **esp)
   *eip = (void (*) (void))ehdr.e_entry;
 
   success = true;
-
-  p->executable = filesys_open (program_name);
+  lock_acquire (&filesys_lock);
   file_deny_write (p->executable);
-
 done:
+
+  if (lock_held_by_current_thread (&filesys_lock))
+    lock_release (&filesys_lock);
+
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  /* No close is needed since it is done in process_exit */
+
   return success;
 }
 
@@ -664,6 +686,7 @@ process_init (void)
 
   struct thread *t = thread_current ();
   pid_t p = process_create (t);
+  lock_init (&filesys_lock);
 
   if (p == PID_ERROR)
     PANIC ("Failed to init process");
