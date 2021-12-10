@@ -142,7 +142,7 @@ void
 debug_thread (const void *curr, const char *file, int line, const char *func,
               const char *fmt, ...)
 {
-  struct thread *cur = curr;
+  const struct thread *cur = curr;
   struct process *proc = cur->process;
   enum thread_status status = cur->status;
   char *status_str = NULL;
