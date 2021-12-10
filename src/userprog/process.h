@@ -5,6 +5,8 @@
 typedef int pid_t;
 #define PID_ERROR ((pid_t)-1)
 
+typedef int fd_t;
+#define FD_ERROR ((fd_t)-1)
 
 #include "threads/vaddr.h"
 
@@ -14,6 +16,7 @@ typedef int pid_t;
 
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "vm/page.h"
 extern struct lock filesys_lock;
 
 struct process
@@ -38,6 +41,9 @@ struct process
   struct semaphore exit_sema; /* Semaphore for exiting. */
 
   struct file *executable; /* Executable file. */
+
+  struct supp_table supp_table; /* Supplemental page table. */
+  void *esp; /* Stack pointer, used for save esp in syscall */
 };
 
 tid_t process_execute (const char *file_name);
@@ -47,13 +53,15 @@ void process_activate (void);
 
 void process_init (void);
 const char *process_name (void);
-
 struct process *process_current (void);
 pid_t process_create (struct thread *t);
 struct process *process_find (pid_t pid);
 
 bool allocate_stack (void *upage, bool zero);
 
+fd_t process_allocate_fd (struct file *);
+struct file *process_get_file (fd_t);
+void process_free_fd (fd_t fd);
 
 bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                    uint32_t read_bytes, uint32_t zero_bytes, bool writable);

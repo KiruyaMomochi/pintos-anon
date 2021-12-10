@@ -797,11 +797,11 @@ process_current (void)
 }
 
 /* Allocate file descriptor for FILE. Returns -1 if failed. */
-int
+fd_t
 process_allocate_fd (struct file *file)
 {
   struct process *p = process_current ();
-  int fd;
+  fd_t fd;
 
   /* Find an unused file descriptor in current fd_table. */
   for (fd = 2; fd < p->fd_count; fd++)
@@ -820,7 +820,7 @@ process_allocate_fd (struct file *file)
   struct file **new_fd_table
       = realloc (p->fd_table, new_fd_count * sizeof (struct file *));
   if (new_fd_table == NULL)
-    return -1;
+    return FD_ERROR;
   memset (new_fd_table + p->fd_count, 0,
           (new_fd_count - p->fd_count) * sizeof (struct file *));
   p->fd_table = new_fd_table;
@@ -834,7 +834,7 @@ process_allocate_fd (struct file *file)
 
 /* Get file for FD. */
 struct file *
-process_get_file (int fd)
+process_get_file (fd_t fd)
 {
   struct process *p = process_current ();
   if (fd < 2 || fd >= p->fd_count)
@@ -849,7 +849,7 @@ process_get_file (int fd)
 
 /* Free file descriptor FD. */
 void
-process_free_fd (int fd)
+process_free_fd (fd_t fd)
 {
   struct process *p = process_current ();
   ASSERT (fd >= 2 && fd < p->fd_count);
