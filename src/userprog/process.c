@@ -195,18 +195,23 @@ process_exit (void)
     }
 
   /* Close all opened files */
-  for (size_t fd = 2; fd < p->fd_count; fd++)
+  for (int fd = 2; fd < p->fd_count; fd++)
     {
       if (p->fd_table[fd] == NULL)
         continue;
+      lock_acquire (&filesys_lock);
       file_close (p->fd_table[fd]);
+      lock_release (&filesys_lock);
+
       process_free_fd (fd);
     }
 
   /* Free fd table */
   free (p->fd_table);
 
+  lock_acquire (&filesys_lock);
   file_close (p->executable);
+  lock_release (&filesys_lock);
 
   if (has_parent)
     {
