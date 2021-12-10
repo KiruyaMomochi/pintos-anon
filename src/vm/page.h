@@ -64,6 +64,8 @@ struct supp_entry
   struct hash_elem supp_elem;  /* supplemental entry hash element */
   struct list_elem frame_elem; /* frame entry list element */
 
+  /* For swapped page. */
+  size_t swap_index; /* index of the page in the swap file */
 
   /* For page containing file. */
   struct file *file; /* file containing the page */
@@ -98,6 +100,10 @@ struct supp_entry *supp_insert_stack (void *upage, bool zero, bool writable);
 bool supp_destroy (void *upage);
 void supp_remove_all (uint32_t *pd);
 
+/* Swap. */
+
+void supp_swap (struct supp_entry *entry);
+
 /* Property accessors. */
 
 bool supp_is_code (struct supp_entry *entry);
@@ -111,5 +117,10 @@ bool supp_is_swapped (struct supp_entry *entry);
 bool supp_is_pinned (struct supp_entry *entry);
 bool supp_is_dirty (struct supp_entry *entry);
 bool supp_is_accessed (struct supp_entry *entry);
+
+/* Debug helpers. */
+
+void supp_print_entry (struct supp_entry *entry);
+void supp_dump_table (struct supp_table *table);
 
 #endif // VM_PAGE_H

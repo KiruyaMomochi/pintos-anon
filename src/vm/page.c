@@ -210,6 +210,9 @@ supp_remove_action (struct hash_elem *e, void *aux)
   struct supp_entry *entry = hash_entry (e, struct supp_entry, supp_elem);
   uint32_t *pd = aux;
 
+  if (supp_is_swapped (entry))
+    swap_remove (entry->swap_index);
+
   if (supp_is_mmap (entry) && supp_is_loaded (entry))
     {
       bool dirty = entry->dirty || pagedir_is_dirty (pd, entry->upage);
@@ -262,6 +265,14 @@ supp_handle_page_fault (void *fault_page)
       DEBUG_PRINT ("Found file entry for %p", fault_page);
       bool read_success = supp_load_file (entry);
       return read_success;
+    }
+
+  /* If the page is in swap, load it back. */
+  if (supp_is_swapped (entry))
+    {
+      DEBUG_PRINT ("Found swapped entry for %p", fault_page);
+      supp_unswap (entry);
+      return true;
     }
 
   return false;
@@ -390,6 +401,61 @@ supp_is_pinned (struct supp_entry *entry)
   return entry->pinned;
 }
 
+/* Swap */
+
+/* Set swap index of ENTRY to INDEX. */
+static void
+supp_set_swap (struct supp_entry *entry, size_t index)
+{
+  ASSERT (entry != NULL);
+  ASSERT (supp_is_loaded (entry));
+
+  entry->swap_index = index;
+  supp_set_state (entry, SWAPPED);
+}
+
+/* Move ENTRY from memory to swap.
+
+   State: LOADED -> SWAPPED.
+   Type:  All types except SUPP_MMAP. */
+void
+supp_swap (struct supp_entry *entry)
+{
+  ASSERT (entry != NULL);
+  ASSERT (supp_is_loaded (entry));
+  ASSERT (!supp_is_mmap (entry));
+  ASSERT (entry->pinned == false);
+
+  size_t swap_index = swap_install (entry->kpage);
+  frame_uninstall (entry);
+  frame_free (entry);
+  supp_set_swap (entry, swap_index);
+}
+
+/* Move ENTRY from swap to memory.
+
+   State: SWAPPED -> LOADED.
+   Type:  All types except SUPP_MMAP. */
+static void
+supp_unswap (struct supp_entry *entry)
+{
+  ASSERT (entry != NULL);
+  ASSERT (supp_is_swapped (entry));
+  ASSERT (!supp_is_mmap (entry));
+
+  if (!frame_allocate_swap (PAL_USER, entry))
+    PANIC ("Failed to allocate frame for unswap");
+
+  if (!frame_install (entry))
+    {
+      frame_free (entry);
+      PANIC ("Failed to install frame for unswap");
+    }
+
+  swap_uninstall (entry->swap_index, entry->kpage);
+  supp_set_state (entry, LOADED);
+}
+
 /* File */
 
 /* Load file ENTRY from file.
@@ -505,6 +571,33 @@ supp_insert_mmap (void *upage, struct file *file, off_t ofs, size_t read_bytes,
   entry->type = SUPP_MMAP;
   return entry;
 }
+
+/* Stack */
+
+/* Allocate a new stack supplemental page,
+   insert it into the supplemental page table,
+   then load it immediately.
+   Return the new supplemental page, or a null pointer if it
+   fails. */
+struct supp_entry *
+supp_insert_stack (void *upage, bool zero, bool writable)
+{
+  struct supp_entry *entry = supp_insert_base (upage, writable);
+  if (entry == NULL)
+    return NULL;
+
+  if (zero)
+    entry->type = SUPP_ZERO;
+
+  if (!supp_load_normal (entry))
+    {
+      supp_destroy_entry (entry);
+      return NULL;
+    }
+
+  return entry;
+}
+
 /* Normal */
 
 /* Load a normal or zero supplemental page.
@@ -591,3 +684,44 @@ supp_is_accessed (struct supp_entry *entry)
   return pagedir_is_accessed (entry->owner->pagedir, entry->upage);
 }
 
+/* Debug */
+
+/* Print supplemental page ENTRY. */
+void
+supp_print_entry (struct supp_entry *entry)
+{
+  ASSERT (entry != NULL);
+
+  printf (COLOR_YEL);
+  printf ("SUPP ENTRY: %p\n", entry);
+  printf ("  upage: %p\n", entry->upage);
+  printf ("  kpage: %p\n", entry->kpage);
+  printf ("  writable: %d\n", entry->writable);
+  printf ("  pinned: %d\n", entry->pinned);
+  printf ("  state: %d\n", entry->state);
+  printf ("  type: %d\n", entry->type);
+  printf ("  swap_index: %d\n", entry->swap_index);
+  printf ("  file: %p\n", entry->file);
+  printf ("  ofs: %d\n", entry->ofs);
+  printf ("  read_bytes: %d\n", entry->read_bytes);
+  printf ("  zero_bytes: %d\n", entry->zero_bytes);
+
+  if (supp_is_loaded (entry))
+    {
+      printf ("  accessed: %d\n", supp_is_accessed (entry));
+      printf ("  dirty: %d\n", supp_is_dirty (entry));
+    }
+
+  printf (COLOR_RESET);
+}
+
+/* Print supplemental page TABLE. */
+void
+supp_dump_table (struct supp_table *table)
+{
+  struct hash_iterator i;
+  hash_first (&i, &table->hash);
+  while (hash_next (&i))
+    supp_print_entry (
+        hash_entry (hash_cur (&i), struct supp_entry, supp_elem));
+}
