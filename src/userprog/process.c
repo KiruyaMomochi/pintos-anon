@@ -171,7 +171,7 @@ process_exit (void)
          that's been freed (and cleared). */
       t->pagedir = NULL;
       pagedir_activate (NULL);
-      pagedir_destroy (pd);
+      supp_remove_all (pd);
     }
 
   bool has_parent = p->parent != NULL;
