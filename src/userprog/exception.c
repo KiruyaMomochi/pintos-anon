@@ -178,6 +178,10 @@ page_fault (struct intr_frame *f)
   if (!not_present)
     goto fail;
 
+  void *fault_page = pg_round_down (fault_addr);
+  if (is_user_vaddr (fault_addr) && supp_handle_page_fault (fault_page))
+    return;
+
 
 fail:
   if (write)

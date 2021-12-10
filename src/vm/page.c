@@ -234,6 +234,8 @@ supp_remove_all (uint32_t *pd)
   pagedir_destroy (pd);
 }
 
+/* Handles page fault at FAULT_PAGE.
+   If the page is not loaded or in swap, load it from swap or file. */
 bool
 supp_handle_page_fault (void *fault_page)
 {
@@ -388,6 +390,98 @@ supp_is_pinned (struct supp_entry *entry)
   return entry->pinned;
 }
 
+/* File */
+
+/* Load file ENTRY from file.
+
+   State: NOT_LOADED -> LOADED.
+   Type:  SUPP_CODE or SUPP_MMAP. */
+static bool
+supp_load_file (struct supp_entry *entry)
+{
+  ASSERT (entry != NULL);
+  ASSERT (supp_is_not_loaded (entry));
+  ASSERT (supp_is_file (entry));
+
+  struct file *file = entry->file;
+  off_t ofs = entry->ofs;
+  uint32_t read_bytes = entry->read_bytes;
+  uint32_t zero_bytes = entry->zero_bytes;
+
+  /* Get a page of memory. */
+  if (!frame_allocate_swap (PAL_USER, entry))
+    return false;
+
+  ASSERT (entry->kpage != NULL);
+
+  /* Read file if necessary. */
+  if (read_bytes > 0)
+    {
+      /* To avoid recursive locks, only acquire the lock if it's held
+         by other threads. */
+      bool should_lock = !lock_held_by_current_thread (&filesys_lock);
+      if (should_lock)
+        lock_acquire (&filesys_lock);
+
+      file_seek (file, ofs);
+      off_t bytes_read = file_read (file, entry->kpage, read_bytes);
+
+      if (should_lock)
+        lock_release (&filesys_lock);
+
+      /* Load this page. */
+      if (bytes_read != (int)read_bytes)
+        {
+          frame_free (entry);
+          return false;
+        }
+    }
+
+  /* Zero out the rest of the page. */
+  memset (entry->kpage + read_bytes, 0, zero_bytes);
+
+  /* Add the page to the process's address space. */
+  if (!frame_install (entry))
+    {
+      frame_free (entry);
+      return false;
+    }
+
+  supp_set_state (entry, LOADED);
+  return true;
+}
+
+/* Normal */
+
+/* Load a normal or zero supplemental page.
+   Returns whether the load succeeds.
+
+   State: NOT_LOADED -> LOADED.
+   Type:  SUPP_ZERO or SUPP_NORMAL. */
+static bool
+supp_load_normal (struct supp_entry *entry)
+{
+  ASSERT (entry != NULL);
+  ASSERT (supp_is_not_loaded (entry));
+  ASSERT (supp_is_normal (entry) || supp_is_zero (entry));
+
+  enum palloc_flags flags = PAL_USER;
+  if (supp_is_zero (entry))
+    flags |= PAL_ZERO;
+
+  /* Get a page of memory. */
+  if (!frame_allocate (flags, entry))
+    return false;
+
+  if (!frame_install (entry))
+    {
+      frame_free (entry);
+      return false;
+    }
+
+  supp_set_state (entry, LOADED);
+  return true;
+}
 
 /* Set kernel page of page entry ENTRY to KPAGE. */
 void

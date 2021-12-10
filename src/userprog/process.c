@@ -13,6 +13,9 @@
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
+#include "utils/colors.h"
+#include "vm/frame.h"
+#include "vm/page.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <kernel/debug.h>
@@ -306,6 +309,45 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static int push_argv_arguments (void **esp, char *save_ptr);
 static void push_argv (void **esp, char *program_name, char *strtok_ptr);
 
+static void
+dump_elf_ehdr (const struct Elf32_Ehdr *ehdr)
+{
+  printf (COLOR_YEL "ELF Header: %p\n", ehdr);
+  printf ("e_ident: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+          ehdr->e_ident[0], ehdr->e_ident[1], ehdr->e_ident[2],
+          ehdr->e_ident[3], ehdr->e_ident[4], ehdr->e_ident[5],
+          ehdr->e_ident[6], ehdr->e_ident[7]);
+  printf ("e_type: %x\n", ehdr->e_type);
+  printf ("e_machine: %x\n", ehdr->e_machine);
+  printf ("e_version: %x\n", ehdr->e_version);
+  printf ("e_entry: %x\n", ehdr->e_entry);
+  printf ("e_phoff: %x\n", ehdr->e_phoff);
+  printf ("e_shoff: %x\n", ehdr->e_shoff);
+  printf ("e_flags: %x\n", ehdr->e_flags);
+  printf ("e_ehsize: %x\n", ehdr->e_ehsize);
+  printf ("e_phentsize: %x\n", ehdr->e_phentsize);
+  printf ("e_phnum: %x\n", ehdr->e_phnum);
+  printf ("e_shentsize: %x\n", ehdr->e_shentsize);
+  printf ("e_shnum: %x\n", ehdr->e_shnum);
+  printf ("e_shstrndx: %x\n", ehdr->e_shstrndx);
+  printf (COLOR_RESET);
+}
+
+static void
+dump_elf_phdr (struct Elf32_Phdr *phdr)
+{
+  printf (COLOR_YEL "Program Header %p:\n", phdr);
+  printf ("type: %x\n", phdr->p_type);
+  printf ("offset: %x\n", phdr->p_offset);
+  printf ("vaddr: %x\n", phdr->p_vaddr);
+  printf ("paddr: %x\n", phdr->p_paddr);
+  printf ("filesz: %x\n", phdr->p_filesz);
+  printf ("memsz: %x\n", phdr->p_memsz);
+  printf ("flags: %x\n", phdr->p_flags);
+  printf ("align: %x\n", phdr->p_align);
+  printf (COLOR_RESET);
+}
+
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
@@ -510,8 +552,7 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
 
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
-static bool
-
+bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
               uint32_t read_bytes, uint32_t zero_bytes, bool writable)
 {
@@ -519,7 +560,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
-  file_seek (file, ofs);
+  DEBUG_PRINT ("ofs = %d, upage = %p, read_bytes = %d, "
+               "zero_bytes = %d, writable = %d",
+               ofs, upage, read_bytes, zero_bytes, writable);
+
+  int page_allocated = 0;
+  bool rollback = false;
+
   while (read_bytes > 0 || zero_bytes > 0)
     {
       /* Calculate how to fill this page.
@@ -528,31 +575,43 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
-        return false;
+      struct supp_entry *supp;
 
       /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int)page_read_bytes)
         {
-          palloc_free_page (kpage);
-          return false;
+          supp = supp_insert_code (upage, file, ofs, page_read_bytes,
+                                   page_zero_bytes, writable);
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
 
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable))
+      if (supp == NULL)
         {
-          palloc_free_page (kpage);
-          return false;
+          rollback = true;
+          break;
         }
 
       /* Advance. */
+      ofs += page_read_bytes;
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+      page_allocated++;
     }
+
+  if (rollback)
+    {
+      upage -= PGSIZE;
+      while (page_allocated > 0)
+        {
+          supp_destroy (upage);
+          upage -= PGSIZE;
+          page_allocated--;
+        }
+
+      return false;
+    }
+
   return true;
 }
 
@@ -708,6 +767,7 @@ process_create (struct thread *t)
   snprintf (p->name, sizeof (p->name), "[T]%s", t->name);
   t->process = p;
   p->pid = t->tid;
+  p->thread = t;
 
   return p->pid;
 }
@@ -730,6 +790,8 @@ init_process (struct process *p)
   sema_init (&(p->load_sema), 0);
   sema_init (&(p->wait_sema), 0);
   sema_init (&(p->exit_sema), 0);
+
+  supp_init (&(p->supp_table));
 
   p->parent = NULL;
   p->executable = NULL;

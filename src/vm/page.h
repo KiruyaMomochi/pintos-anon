@@ -1,7 +1,7 @@
 #ifndef VM_PAGE_H
 #define VM_PAGE_H
 
-/* Supplemental page table.
+/* Supplemental page table and Frame table.
 
    The supplemental page table supplements the page table with
    additional data about each page. It is needed because of the
@@ -9,9 +9,19 @@
    structure is often called a "page table" also. We add the word
    "supplemental" to reduce confusion.
 
+   The frame table contains one entry for each frame that contains
+   a user page. Each entry contains a pointer to the page, if any,
+   that currently occupies it, and other data. The frame table allows
+   us to efficiently implement an eviction policy, by choosing a
+   page to evict when no frames are free.
+
    Each entry has three states and four types. An entry is NOT_LOADED
    at the beginning. After a page fault occurs or required by user,
    it's LOADED into the frame, and also in frame table.
+
+   When the frame is full, some page maybe evicted. For a mmap'd file
+   page, write it back to the file. For other pages, move the page
+   to swap space, and it's state changes to SWAPPED.
 */
 
 #include "filesys/file.h"
@@ -54,6 +64,12 @@ struct supp_entry
   struct hash_elem supp_elem;  /* supplemental entry hash element */
   struct list_elem frame_elem; /* frame entry list element */
 
+
+  /* For page containing file. */
+  struct file *file; /* file containing the page */
+  off_t ofs;         /* offset of the page in the file */
+  size_t read_bytes; /* number of bytes read from the page */
+  size_t zero_bytes; /* number of bytes zeroed in the page */
 };
 
 /* The supplemental page table. */
@@ -63,6 +79,24 @@ struct supp_table
 };
 
 void supp_init (struct supp_table *table);
+struct supp_entry *supp_find (void *upage);
+void supp_unload (struct supp_entry *entry);
+void supp_set_kpage (struct supp_entry *entry, void *kpage);
+
+bool supp_handle_page_fault (void *);
+
+/* Insertion and removal. */
+
+struct supp_entry *supp_insert_code (void *upage, struct file *file, off_t ofs,
+                                     size_t read_bytes, size_t zero_bytes,
+                                     bool writable);
+struct supp_entry *supp_insert_mmap (void *upage, struct file *file, off_t ofs,
+                                     size_t read_bytes, size_t zero_bytes,
+                                     bool writable);
+struct supp_entry *supp_insert_stack (void *upage, bool zero, bool writable);
+
+bool supp_destroy (void *upage);
+void supp_remove_all (uint32_t *pd);
 
 /* Property accessors. */
 
