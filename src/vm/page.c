@@ -1,4 +1,5 @@
 #include "page.h"
+#include "frame.h"
 #include "kernel/debug.h"
 #include "swap.h"
 #include "threads/malloc.h"
@@ -21,6 +22,15 @@ static struct supp_entry *supp_remove_entry (struct supp_table *table,
                                              struct supp_entry *entry);
 static struct supp_entry *supp_find_entry (struct supp_table *table,
                                            void *upage);
+
+static struct supp_entry *supp_insert_base (void *upage, bool writable);
+static bool supp_destroy_entry (struct supp_entry *entry);
+static void supp_set_state (struct supp_entry *entry, enum supp_state state);
+static void supp_set_swap (struct supp_entry *entry, size_t swap_index);
+static void supp_write_mmap (struct supp_entry *entry);
+static bool supp_load_file (struct supp_entry *entry);
+static bool supp_load_normal (struct supp_entry *entry);
+static void supp_unswap (struct supp_entry *entry);
 
 /* Hash table operations */
 
@@ -95,6 +105,164 @@ supp_find_entry (struct supp_table *table, void *upage)
   e = hash_find (&table->hash, &entry.supp_elem);
 
   return e != NULL ? hash_entry (e, struct supp_entry, supp_elem) : NULL;
+}
+
+/* General */
+
+/* Find an entry in current process's supplemental table with user page UPAGE.
+   Returns a pointer to the entry, or a null pointer if no entry is found. */
+struct supp_entry *
+supp_find (void *upage)
+{
+  return supp_find_entry (&process_current ()->supp_table, upage);
+}
+
+/* Unload ENTRY from current process's supplemental table.
+
+   State: Loaded -> Not Loaded
+   Type:  All types */
+void
+supp_unload (struct supp_entry *entry)
+{
+  ASSERT (entry != NULL);
+  ASSERT (supp_is_loaded (entry));
+
+  /* Write back dirty and mmap-ed pages */
+  if (supp_is_mmap (entry) && supp_is_dirty (entry))
+    supp_write_mmap (entry);
+
+  frame_uninstall (entry);
+  frame_free (entry);
+
+  supp_set_state (entry, NOT_LOADED);
+}
+
+/* Common operations when inserting a new entry.
+   Allocate a new entry and insert it into current process's
+   supplemental table. The type of the new entry is SUPP_NORMAL,
+   and may be changed later.
+   Return the new entry, or a null pointer if no memory is
+   available. */
+static struct supp_entry *
+supp_insert_base (void *upage, bool writable)
+{
+  ASSERT (upage != NULL);
+
+  if (supp_find (upage) != NULL)
+    return NULL;
+
+  /* Malloc use kernel pool */
+  struct supp_entry *entry = malloc (sizeof (struct supp_entry));
+  if (entry == NULL)
+    return NULL;
+
+  entry->state = NOT_LOADED;
+  entry->type = SUPP_NORMAL;
+  entry->kpage = NULL;
+  entry->upage = upage;
+
+  entry->owner = thread_current ();
+  entry->writable = writable;
+  entry->pinned = false;
+  entry->dirty = false;
+
+  entry->file = NULL;
+
+  return supp_insert_entry (&process_current ()->supp_table, entry);
+}
+
+/* Destroy an entry. If it's loaded, unload it first.
+   Return true if the entry is destroyed successfully. */
+static bool
+supp_destroy_entry (struct supp_entry *entry)
+{
+  ASSERT (entry != NULL);
+  ASSERT (supp_is_not_loaded (entry) || supp_is_loaded (entry));
+
+  struct process *process = process_current ();
+  ASSERT (process != NULL && process->thread == entry->owner);
+
+  if (supp_is_loaded (entry))
+    supp_unload (entry);
+
+  if (supp_remove_entry (&process->supp_table, entry) == NULL)
+    return false;
+
+  free (entry);
+
+  return true;
+}
+
+/* Destroy entry with UPAGE from current process's supplemental table.
+   Return true if the entry is destroyed successfully. */
+bool
+supp_destroy (void *upage)
+{
+  ASSERT (upage != NULL);
+  struct supp_entry *entry = supp_find (upage);
+  return supp_destroy_entry (entry);
+}
+
+/* Hash helper for removing entry from supplemental hash table. */
+static void
+supp_remove_action (struct hash_elem *e, void *aux)
+{
+  struct supp_entry *entry = hash_entry (e, struct supp_entry, supp_elem);
+  uint32_t *pd = aux;
+
+  if (supp_is_mmap (entry) && supp_is_loaded (entry))
+    {
+      bool dirty = entry->dirty || pagedir_is_dirty (pd, entry->upage);
+      if (dirty)
+        supp_write_mmap (entry);
+    }
+
+  if (supp_is_loaded (entry))
+    frame_remove (entry);
+}
+
+/* Remove all entries from supplemental table of current process.
+   Using PD as the page directory, and destroy it. */
+void
+supp_remove_all (uint32_t *pd)
+{
+  struct process *process = process_current ();
+  struct hash *hash = &process->supp_table.hash;
+  hash->aux = pd;
+
+  hash_clear (hash, supp_remove_action);
+  pagedir_destroy (pd);
+}
+
+bool
+supp_handle_page_fault (void *fault_page)
+{
+  /* The address should be page aligned. */
+  ASSERT (((uint32_t)fault_page & PGMASK) == 0);
+
+  /* Ignore null pointer. */
+  if (fault_page == NULL)
+    return false;
+
+  /* Ignore page faults in kernel */
+  if (is_kernel_vaddr (fault_page))
+    return false;
+
+  /* Ignore if page does not exist in
+     current process's supplemental table. */
+  struct supp_entry *entry = supp_find (fault_page);
+  if (entry == NULL)
+    return false;
+
+  /* If the page is a file and not loaded, load it from file. */
+  if (supp_is_not_loaded (entry) && supp_is_file (entry))
+    {
+      DEBUG_PRINT ("Found file entry for %p", fault_page);
+      bool read_success = supp_load_file (entry);
+      return read_success;
+    }
+
+  return false;
 }
 
 /* State and Type */
@@ -218,5 +386,60 @@ supp_is_pinned (struct supp_entry *entry)
 {
   ASSERT (entry != NULL);
   return entry->pinned;
+}
+
+
+/* Set kernel page of page entry ENTRY to KPAGE. */
+void
+supp_set_kpage (struct supp_entry *entry, void *kpage)
+{
+  ASSERT (entry != NULL);
+
+  if (kpage == NULL)
+    {
+      ASSERT (entry->kpage != NULL);
+    }
+  else
+    {
+      ASSERT (entry->kpage == NULL);
+    }
+
+  entry->kpage = kpage;
+}
+
+/* Pagedir */
+
+/* Return whether supplemental page ENTRY is dirty.
+
+   An entry becomes dirty after it has been modified by the
+   process. We determine this by checking the dirty bit in the
+   supplemental page's pagedir, and the dirty value of entry.
+
+   We do not check the dirty bit for kernel page, that means
+   all modifications should use user pages. */
+bool
+supp_is_dirty (struct supp_entry *entry)
+{
+  ASSERT (entry != NULL);
+  ASSERT (supp_is_loaded (entry));
+
+  return entry->dirty
+         || pagedir_is_dirty (entry->owner->pagedir, entry->upage);
+}
+
+/* Return whether supplemental page ENTRY is accessed.
+
+   An entry becomes accessed after it has been read or written
+   by the process. We determine this by checking the accessed bit
+   in the supplemental page's pagedir.
+
+   We do not check the accessed bit for kernel page. */
+bool
+supp_is_accessed (struct supp_entry *entry)
+{
+  ASSERT (entry != NULL);
+  ASSERT (supp_is_loaded (entry));
+
+  return pagedir_is_accessed (entry->owner->pagedir, entry->upage);
 }
 

@@ -179,6 +179,13 @@ page_fault (struct intr_frame *f)
     goto fail;
 
 
+fail:
+  if (write)
+    {
+      DEBUG_PRINT (COLOR_MAG "Writing to read-only page.");
+      thread_exit ();
+    }
+
   if (!user)
     {
       DEBUG_PRINT (COLOR_MAG "Kernel page fault.");
