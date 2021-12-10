@@ -8,6 +8,9 @@ typedef int pid_t;
 typedef int fd_t;
 #define FD_ERROR ((fd_t)-1)
 
+typedef int mapid_t;
+#define MAP_FAILED ((mapid_t)-1)
+
 #include "threads/vaddr.h"
 
 /* 8 MB of user stack. */
@@ -16,6 +19,7 @@ typedef int fd_t;
 
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "vm/mmap.h"
 #include "vm/page.h"
 extern struct lock filesys_lock;
 
@@ -29,6 +33,9 @@ struct process
 
   struct file **fd_table; /* File descriptor table. */
   int fd_count;           /* Number of open files. */
+
+  struct mmap_file **mmap_table; /* Memory-mapped file table. */
+  int mmap_count;                /* Number of memory-mapped files. */
 
   struct process *parent;      /* Parent process. */
   struct list chilren;         /* List of child processes. */
@@ -63,8 +70,13 @@ fd_t process_allocate_fd (struct file *);
 struct file *process_get_file (fd_t);
 void process_free_fd (fd_t fd);
 
+mapid_t process_allocate_mapid (struct mmap_file *);
+struct mmap_file *process_get_mmap (mapid_t mapid);
+void process_free_mapid (mapid_t mapid);
+
 bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
-                   uint32_t read_bytes, uint32_t zero_bytes, bool writable);
+                   uint32_t read_bytes, uint32_t zero_bytes, bool writable,
+                   bool is_code);
 
 pid_t tid_to_pid (tid_t tid);
 tid_t pid_to_tid (pid_t pid);

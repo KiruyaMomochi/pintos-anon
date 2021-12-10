@@ -2,8 +2,8 @@
 #include "debug.h"
 #include "devices/input.h"
 #include "devices/shutdown.h"
-#include "filesys/filesys.h"
 #include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "kernel/debug.h"
 #include "pagedir.h"
 #include "threads/init.h"
@@ -13,11 +13,9 @@
 #include "threads/vaddr.h"
 #include "userprog/process.h"
 #include "utils/colors.h"
+#include "vm/mmap.h"
 #include <stdio.h>
 #include <syscall-nr.h>
-
-// TODO: Use this lock to keep synchronization
-static struct lock filesys_lock; /* Lock for file system operations */
 
 static void syscall_handler (struct intr_frame *);
 static void halt (void) NO_RETURN;
@@ -33,6 +31,8 @@ static int write (int fd, const void *buffer, unsigned size);
 static void seek (int fd, unsigned position);
 static unsigned tell (int fd);
 static void close (int fd);
+static mapid_t mmap (int fd, void *addr);
+static void munmap (mapid_t mapid);
 
 #ifdef DEBUG_KERNEL
 #define DEBUG_PRINT_SYSCALL_START(...)                                        \
@@ -53,7 +53,6 @@ void
 syscall_init (void)
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-  lock_init (&filesys_lock);
 }
 
 /* Reads a byte at user virtual address UADDR.
@@ -435,6 +434,24 @@ syscall_handler (struct intr_frame *f)
         DEBUG_PRINT_SYSCALL_END ("[%s (%d)]", syscall, fd);
         break;
       }
+    case SYS_MMAP:
+      {
+        int fd = *(sp + 1);
+        void *addr = (void *)*(sp + 2);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%d, %p))", syscall, fd, addr);
+        ret = mmap (fd, addr);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%d, %p) -> %d]", syscall, fd, addr,
+                                 ret);
+        break;
+      }
+    case SYS_MUNMAP:
+      {
+        mapid_t mapid = *(sp + 1);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%d))", syscall, mapid);
+        munmap (mapid);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%d)]", syscall, mapid);
+        break;
+      }
     default:
       PANIC (COLOR_RED "Unknown system call %s" COLOR_RESET, syscall);
       ret = -1;
@@ -673,4 +690,54 @@ close (int fd)
     }
   file_close (f);
   process_free_fd (fd);
+}
+
+static mapid_t
+mmap (int fd, void *addr)
+{
+  struct file *f = process_get_file (fd);
+
+  if (f == NULL)
+    {
+      DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[mmap %d failed]", fd);
+      thread_exit ();
+    }
+
+  if (addr == NULL || ((uint32_t)addr & PGMASK) != 0)
+    {
+      DEBUG_PRINT ("Failed: invalid address");
+      return MAP_FAILED;
+    }
+
+  struct mmap_file *mmap_file = mmap_file_create (f, addr);
+
+  if (mmap_file == NULL)
+    {
+      DEBUG_PRINT ("Failed: mmap_file_create failed");
+      return MAP_FAILED;
+    }
+
+  mapid_t mapid = process_allocate_mapid (mmap_file);
+
+  if (mapid == MAP_FAILED)
+    {
+      DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[mmap %d failed]", fd);
+      thread_exit ();
+    }
+
+  return mapid;
+}
+
+static void
+munmap (mapid_t mapid)
+{
+  struct mmap_file *mmap_file = process_get_mmap (mapid);
+  if (mmap_file == NULL)
+    {
+      DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[munmap %d failed]", mapid);
+      thread_exit ();
+    }
+
+  mmap_file_destroy (mmap_file);
+  process_free_mapid (mapid);
 }

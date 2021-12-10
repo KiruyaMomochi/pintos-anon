@@ -451,6 +451,60 @@ supp_load_file (struct supp_entry *entry)
   return true;
 }
 
+/* Write back a loadded mmap file ENTRY. */
+static void
+supp_write_mmap (struct supp_entry *entry)
+{
+  ASSERT (entry != NULL);
+  ASSERT (supp_is_loaded (entry));
+  ASSERT (supp_is_mmap (entry));
+
+  struct file *file = entry->file;
+  off_t ofs = entry->ofs;
+  uint32_t read_bytes = entry->read_bytes;
+
+  file_seek (file, ofs);
+  file_write (file, entry->kpage, read_bytes);
+}
+
+/* Allocate a new code supplemental page,
+   and insert it into the supplemental page table.
+   Return the new supplemental page, or a null pointer if no memory
+   is available. */
+struct supp_entry *
+supp_insert_code (void *upage, struct file *file, off_t ofs, size_t read_bytes,
+                  size_t zero_bytes, bool writable)
+{
+  struct supp_entry *entry = supp_insert_base (upage, writable);
+  if (entry == NULL)
+    return NULL;
+
+  entry->type = SUPP_CODE;
+
+  entry->file = file;
+  entry->ofs = ofs;
+  entry->read_bytes = read_bytes;
+  entry->zero_bytes = zero_bytes;
+
+  return entry;
+}
+
+/* Allocate a new mmap supplemental page,
+   and insert it into the supplemental page table.
+   Return the new supplemental page, or a null pointer if no memory
+   is available. */
+struct supp_entry *
+supp_insert_mmap (void *upage, struct file *file, off_t ofs, size_t read_bytes,
+                  size_t zero_bytes, bool writable)
+{
+  struct supp_entry *entry
+      = supp_insert_code (upage, file, ofs, read_bytes, zero_bytes, writable);
+  if (entry == NULL)
+    return NULL;
+
+  entry->type = SUPP_MMAP;
+  return entry;
+}
 /* Normal */
 
 /* Load a normal or zero supplemental page.

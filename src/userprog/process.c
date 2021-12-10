@@ -461,7 +461,7 @@ load (char *file_name, void (**eip) (void), void **esp)
                   zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
                 }
               if (!load_segment (file, file_page, (void *)mem_page, read_bytes,
-                                 zero_bytes, writable))
+                                 zero_bytes, writable, true))
                 goto done;
             }
           else
@@ -493,10 +493,6 @@ done:
 
   return success;
 }
-
-/* load() helpers. */
-
-static bool install_page (void *upage, void *kpage, bool writable);
 
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
@@ -559,7 +555,8 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
    or disk read error occurs. */
 bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
-              uint32_t read_bytes, uint32_t zero_bytes, bool writable)
+              uint32_t read_bytes, uint32_t zero_bytes, bool writable,
+              bool is_code)
 {
   ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT (pg_ofs (upage) == 0);
@@ -582,13 +579,16 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
       struct supp_entry *supp;
 
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int)page_read_bytes)
+      if (is_code)
         {
           supp = supp_insert_code (upage, file, ofs, page_read_bytes,
                                    page_zero_bytes, writable);
         }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
+      else
+        {
+          supp = supp_insert_mmap (upage, file, ofs, page_read_bytes,
+                                   page_zero_bytes, writable);
+        }
 
       if (supp == NULL)
         {
@@ -855,4 +855,66 @@ process_free_fd (fd_t fd)
   ASSERT (fd >= 2 && fd < p->fd_count);
   ASSERT (p->fd_table[fd] != NULL);
   p->fd_table[fd] = NULL;
+}
+
+/* Allocate a new mmap id for file FILE.
+   Returns MAP_FAILED if failed. */
+mapid_t
+process_allocate_mapid (struct mmap_file *mmap_file)
+{
+  struct process *p = process_current ();
+  mapid_t mapid;
+
+  /* Find an unused mapid in current mmap_table. */
+  for (mapid = 1; mapid < p->mmap_count; mapid++)
+    {
+      if (p->mmap_table[mapid] == NULL)
+        {
+          p->mmap_table[mapid] = mmap_file;
+          return mapid;
+        }
+    }
+
+  /* Try to extend mmap_table if there is no unused mapid. */
+  ASSERT (mapid == p->mmap_count)
+  int new_mmap_count = p->mmap_count * 2;
+
+  ASSERT (new_mmap_count > p->mmap_count);
+  struct mmap_file **new_mmap_table
+      = realloc (p->mmap_table, new_mmap_count * sizeof (struct mmap_file *));
+  if (new_mmap_table == NULL)
+    return MAP_FAILED;
+  memset (new_mmap_table + p->mmap_count, 0,
+          (new_mmap_count - p->mmap_count) * sizeof (struct mmap_file *));
+  p->mmap_table = new_mmap_table;
+  p->mmap_count = new_mmap_count;
+
+  /* Set mapid to new mmap_table. */
+  ASSERT (p->mmap_table[mapid] == NULL);
+  p->mmap_table[mapid] = mmap_file;
+  return mapid;
+}
+
+/* Get mmap file with MAPID. */
+struct mmap_file *
+process_get_mmap (mapid_t mapid)
+{
+  struct process *p = process_current ();
+  if (mapid < 1 || mapid >= p->mmap_count)
+    return NULL;
+
+  ASSERT (mapid >= 1 && mapid < p->mmap_count);
+  struct mmap_file *mmap = p->mmap_table[mapid];
+
+  return mmap;
+}
+
+/* Free mmap file with MAPID. */
+void
+process_free_mapid (mapid_t mapid)
+{
+  struct process *p = process_current ();
+  ASSERT (mapid >= 1 && mapid < p->mmap_count);
+  ASSERT (p->mmap_table[mapid] != NULL);
+  p->mmap_table[mapid] = NULL;
 }
