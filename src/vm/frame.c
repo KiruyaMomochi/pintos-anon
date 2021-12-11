@@ -51,9 +51,7 @@ frame_insert (struct supp_entry *entry)
   ASSERT (entry != NULL);
   ASSERT (entry->kpage != NULL);
 
-  lock_acquire (&frame_lock);
   list_push_back (&frame_table, &entry->frame_elem);
-  lock_release (&frame_lock);
 }
 
 /* Remove ENTRY from the frame table. */
@@ -63,17 +61,13 @@ frame_remove (struct supp_entry *entry)
   ASSERT (entry != NULL);
   ASSERT (supp_is_loaded (entry));
 
-  lock_acquire (&frame_lock);
   list_remove (&entry->frame_elem);
-  lock_release (&frame_lock);
 }
 
 /* Choose a victim frame from the frame table, by random strategy. */
 static struct supp_entry *
 frame_choose_victim_random ()
-{  
-  lock_acquire (&frame_lock);
-
+{
   ASSERT (!list_empty (&frame_table));
 
   size_t size = list_size (&frame_table);
@@ -96,7 +90,6 @@ frame_choose_victim_random ()
     }
 
   ASSERT (f != NULL);
-  lock_release (&frame_lock);
 
   return f;
 }
@@ -105,8 +98,6 @@ frame_choose_victim_random ()
 static struct supp_entry *
 frame_choose_victim_second_chance ()
 {
-  lock_acquire (&frame_lock);
-
   ASSERT (!list_empty (&frame_table));
 
   while (true)
@@ -128,7 +119,6 @@ frame_choose_victim_second_chance ()
         }
 
       list_push_back (&frame_table, e);
-      lock_release (&frame_lock);
       return f;
     }
 }
@@ -139,7 +129,8 @@ frame_evict ()
 {
   struct supp_entry *victim = frame_choose_victim_second_chance ();
 
-  DEBUG_THREAD ("evicting frame %p from %s(%d)", victim, victim->owner->name, victim->owner->tid);
+  DEBUG_THREAD ("evicting frame %p from %s(%d)", victim, victim->owner->name,
+                victim->owner->tid);
   ASSERT (victim != NULL);
   ASSERT (!supp_is_pinned (victim));
   ASSERT (supp_is_loaded (victim));
@@ -166,7 +157,9 @@ frame_allocate (enum palloc_flags flags, struct supp_entry *entry)
 
   void *kpage = palloc_get_page (flags);
   if (kpage == NULL)
-    return false;
+    {
+      return false;
+    }
 
   supp_set_kpage (entry, kpage);
   return true;
@@ -181,12 +174,17 @@ frame_allocate_swap (enum palloc_flags flags, struct supp_entry *entry)
   ASSERT (!supp_is_loaded (entry));
   ASSERT ((flags & PAL_USER));
 
+  lock_acquire (&frame_lock);
   bool result = frame_allocate (flags, entry);
+  lock_release (&frame_lock);
+  
   while (!result)
     {
       DEBUG_PRINT ("Memory is full, evicting one.");
+      lock_acquire (&frame_lock);
       frame_evict ();
       result = frame_allocate (flags, entry);
+      lock_release (&frame_lock);
     }
 
   return result;
@@ -214,10 +212,12 @@ frame_install (struct supp_entry *entry)
   ASSERT (entry->upage != NULL);
   ASSERT (!supp_is_loaded (entry));
   ASSERT (entry->owner->pagedir != NULL);
-  
+
   void *current_upage = pagedir_get_page (entry->owner->pagedir, entry->upage);
   if (current_upage != NULL)
-    return false;
+    {
+      return false;
+    }
 
   bool success = pagedir_set_page (entry->owner->pagedir, entry->upage,
                                    entry->kpage, entry->writable);
