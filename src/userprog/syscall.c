@@ -629,7 +629,25 @@ read (int fd, void *buffer, unsigned size)
           DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[open %d failed]", fd);
           thread_exit ();
         }
-      return file_read (f, buffer, size);
+
+      for (uint8_t *page = pg_round_down (buffer);
+           page < (uint8_t *)buffer + size; page += PGSIZE)
+        {
+          check_address (page);
+          struct supp_entry *entry = supp_find (page);
+          supp_set_pinned (entry, true);
+        }
+
+      int bytes_read = file_read (f, buffer, size);
+
+      for (uint8_t *page = pg_round_down (buffer);
+           page < (uint8_t *)buffer + size; page += PGSIZE)
+        {
+          struct supp_entry *entry = supp_find (page);
+          supp_set_pinned (entry, false);
+        }
+      
+      return bytes_read;
     }
 }
 
@@ -654,7 +672,23 @@ write (int fd, const void *buffer, unsigned size)
           DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[open %d failed]", fd);
           thread_exit ();
         }
+
+      for (uint8_t *page = pg_round_down (buffer);
+           page < (uint8_t *)buffer + size; page += PGSIZE)
+        {
+          check_address (page);
+          struct supp_entry *entry = supp_find (page);
+          supp_set_pinned (entry, true);
+        }
+
       write_size = file_write (f, buffer, size);
+
+      for (uint8_t *page = pg_round_down (buffer);
+           page < (uint8_t *)buffer + size; page += PGSIZE)
+        {
+          struct supp_entry *entry = supp_find (page);
+          supp_set_pinned (entry, false);
+        }
     }
   return write_size;
 }
