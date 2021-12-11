@@ -11,9 +11,11 @@ struct block *swap_block;
    A bit is set if the corresponding page is in swap. */
 struct bitmap *swap_bitmap;
 
+/* Number of sectors in swap block. */
 block_sector_t swap_sector_count;
+
+/* Number of sectors we can save in swap block. */
 size_t swap_page_count;
-size_t swap_total_size;
 
 /* Initialize swap table. */
 void
@@ -28,7 +30,7 @@ swap_init (void)
   swap_page_count = swap_sector_count / PAGE_SECTOR_COUNT;
 
   /* Verify the calculation is correct. */
-  swap_total_size = swap_sector_count * BLOCK_SECTOR_SIZE;
+  uint32_t swap_total_size = swap_sector_count * BLOCK_SECTOR_SIZE;
   ASSERT (swap_total_size / PGSIZE == swap_page_count);
 
   /* Create swap bitmap. */
