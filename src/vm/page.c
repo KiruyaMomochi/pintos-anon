@@ -224,11 +224,30 @@ supp_remove_action (struct hash_elem *e, void *aux)
     frame_remove (entry);
 }
 
+static void
+supp_pin_action (struct hash_elem *e, void *aux)
+{
+  struct supp_entry *entry = hash_entry (e, struct supp_entry, supp_elem);
+
+  if (supp_is_loaded (entry))
+    supp_set_pinned (entry, true);
+}
+
+/* Pin all entries from supplemental table of current process. */
+void
+supp_pin_all (void)
+{
+  struct hash *hash = &process_current ()->supp_table.hash;
+  hash_apply (hash, &supp_pin_action);
+}
+
 /* Remove all entries from supplemental table of current process.
    Using PD as the page directory, and destroy it. */
 void
 supp_remove_all (uint32_t *pd)
 {
+  ASSERT (pd != NULL);
+
   struct process *process = process_current ();
   struct hash *hash = &process->supp_table.hash;
   hash->aux = pd;
@@ -680,8 +699,30 @@ supp_is_accessed (struct supp_entry *entry)
 {
   ASSERT (entry != NULL);
   ASSERT (supp_is_loaded (entry));
+  ASSERT (entry->owner->pagedir != NULL);
 
   return pagedir_is_accessed (entry->owner->pagedir, entry->upage);
+}
+
+/* Set access bit of supplemental page ENTRY to ACCESSED. */
+void
+supp_set_accessed (struct supp_entry *entry, bool accessed)
+{
+  ASSERT (entry != NULL);
+  ASSERT (supp_is_loaded (entry));
+  ASSERT (entry->owner->pagedir != NULL);
+
+  pagedir_set_accessed (entry->owner->pagedir, entry->upage, accessed);
+}
+
+/* Set pin bit of supplemental page ENTRY to PINNED. */
+void
+supp_set_pinned (struct supp_entry *entry, bool pinned)
+{
+  ASSERT (entry != NULL);
+  ASSERT (supp_is_loaded (entry));
+
+  entry->pinned = pinned;
 }
 
 /* Debug */

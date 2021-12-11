@@ -25,6 +25,7 @@
 */
 
 #include "filesys/file.h"
+#include "threads/synch.h"
 #include <hash.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -53,13 +54,13 @@ struct supp_entry
   enum supp_state state; /* state of the page */
   enum supp_type type;   /* type of the page */
 
-  void *kpage; /* kernel virtual address of the page */
-  void *upage; /* user virtual address of the page */
+  void *kpage;          /* kernel virtual address of the page */
+  void *upage;          /* user virtual address of the page */
   struct thread *owner; /* thread that owns the page */
 
-  bool writable;        /* is the page writable? */
-  bool pinned;          /* is the page pinned? */
-  bool dirty;           /* is the page dirty? */
+  bool writable; /* is the page writable? */
+  bool pinned;   /* is the page pinned? */
+  bool dirty;    /* is the page dirty? */
 
   struct hash_elem supp_elem;  /* supplemental entry hash element */
   struct list_elem frame_elem; /* frame entry list element */
@@ -117,6 +118,9 @@ bool supp_is_swapped (struct supp_entry *entry);
 bool supp_is_pinned (struct supp_entry *entry);
 bool supp_is_dirty (struct supp_entry *entry);
 bool supp_is_accessed (struct supp_entry *entry);
+
+void supp_set_accessed (struct supp_entry *entry, bool accessed);
+void supp_set_pinned (struct supp_entry *entry, bool pinned);
 
 /* Debug helpers. */
 

@@ -16,6 +16,7 @@
 */
 
 #include "threads/palloc.h"
+#include "threads/synch.h"
 #include <list.h>
 #include <stdbool.h>
 

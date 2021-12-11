@@ -1,8 +1,9 @@
 #include "frame.h"
-#include "swap.h"
 #include "kernel/debug.h"
-#include "threads/thread.h"
+#include "swap.h"
+#include "threads/interrupt.h"
 #include "threads/synch.h"
+#include "threads/thread.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "utils/colors.h"
@@ -12,7 +13,7 @@
 /* Frame table. */
 struct list frame_table;
 
-/* Lock for frame table. 
+/* Lock for frame table.
    Acquiring this lock is required before modifying the frame table.*/
 struct lock frame_lock;
 
@@ -70,7 +71,9 @@ frame_remove (struct supp_entry *entry)
 /* Choose a victim frame from the frame table, by random strategy. */
 static struct supp_entry *
 frame_choose_victim_random ()
-{
+{  
+  lock_acquire (&frame_lock);
+
   ASSERT (!list_empty (&frame_table));
 
   size_t size = list_size (&frame_table);
@@ -93,17 +96,53 @@ frame_choose_victim_random ()
     }
 
   ASSERT (f != NULL);
+  lock_release (&frame_lock);
+
   return f;
+}
+
+/* Choose a victim frame from the frame table, by second chance strategy. */
+static struct supp_entry *
+frame_choose_victim_second_chance ()
+{
+  lock_acquire (&frame_lock);
+
+  ASSERT (!list_empty (&frame_table));
+
+  while (true)
+    {
+      struct list_elem *e = list_pop_front (&frame_table);
+      struct supp_entry *f = list_entry (e, struct supp_entry, frame_elem);
+
+      if (supp_is_pinned (f))
+        {
+          list_push_back (&frame_table, e);
+          continue;
+        }
+
+      if (supp_is_accessed (f))
+        {
+          supp_set_accessed (f, false);
+          list_push_back (&frame_table, e);
+          continue;
+        }
+
+      list_push_back (&frame_table, e);
+      lock_release (&frame_lock);
+      return f;
+    }
 }
 
 /* Evicts a frame from the frame table, returns the victim entry. */
 static struct supp_entry *
 frame_evict ()
 {
-  struct supp_entry *victim = frame_choose_victim_random ();
+  struct supp_entry *victim = frame_choose_victim_second_chance ();
+
+  DEBUG_THREAD ("evicting frame %p from %s(%d)", victim, victim->owner->name, victim->owner->tid);
   ASSERT (victim != NULL);
   ASSERT (!supp_is_pinned (victim));
-  ASSERT (!supp_is_swapped (victim));
+  ASSERT (supp_is_loaded (victim));
 
   if (supp_is_mmap (victim))
     {
@@ -170,10 +209,12 @@ frame_free (struct supp_entry *entry)
 bool
 frame_install (struct supp_entry *entry)
 {
+  ASSERT (entry != NULL);
   ASSERT (entry->kpage != NULL);
   ASSERT (entry->upage != NULL);
   ASSERT (!supp_is_loaded (entry));
-
+  ASSERT (entry->owner->pagedir != NULL);
+  
   void *current_upage = pagedir_get_page (entry->owner->pagedir, entry->upage);
   if (current_upage != NULL)
     return false;
@@ -190,9 +231,11 @@ frame_install (struct supp_entry *entry)
 void
 frame_uninstall (struct supp_entry *entry)
 {
+  ASSERT (entry != NULL);
+  ASSERT (supp_is_loaded (entry));
   ASSERT (entry->kpage != NULL);
   ASSERT (entry->upage != NULL);
-  ASSERT (supp_is_loaded (entry));
+  ASSERT (entry->owner->pagedir != NULL);
 
   pagedir_clear_page (entry->owner->pagedir, entry->upage);
   frame_remove (entry);
