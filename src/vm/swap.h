@@ -1,6 +1,7 @@
 #ifndef VM_SWAP_H
 #define VM_SWAP_H
 
+/* Number of sectors we need to save a page. */
 #define PAGE_SECTOR_COUNT (PGSIZE / BLOCK_SECTOR_SIZE)
 
 #include <stddef.h>
