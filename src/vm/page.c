@@ -682,6 +682,7 @@ supp_is_dirty (struct supp_entry *entry)
 {
   ASSERT (entry != NULL);
   ASSERT (supp_is_loaded (entry));
+  ASSERT (entry->owner->pagedir != NULL);
 
   return entry->dirty
          || pagedir_is_dirty (entry->owner->pagedir, entry->upage);
