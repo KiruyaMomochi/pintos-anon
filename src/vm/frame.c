@@ -2,6 +2,7 @@
 #include "swap.h"
 #include "kernel/debug.h"
 #include "threads/thread.h"
+#include "threads/synch.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "utils/colors.h"
@@ -11,11 +12,16 @@
 /* Frame table. */
 struct list frame_table;
 
+/* Lock for frame table. 
+   Acquiring this lock is required before modifying the frame table.*/
+struct lock frame_lock;
+
 /* Initializes the frame table. */
 void
 frame_init (void)
 {
   list_init (&frame_table);
+  lock_init (&frame_lock);
 }
 
 /* Looks up the frame with given kernel page KPAGE. */
@@ -42,7 +48,11 @@ static void
 frame_insert (struct supp_entry *entry)
 {
   ASSERT (entry != NULL);
+  ASSERT (entry->kpage != NULL);
+
+  lock_acquire (&frame_lock);
   list_push_back (&frame_table, &entry->frame_elem);
+  lock_release (&frame_lock);
 }
 
 /* Remove ENTRY from the frame table. */
@@ -52,7 +62,9 @@ frame_remove (struct supp_entry *entry)
   ASSERT (entry != NULL);
   ASSERT (supp_is_loaded (entry));
 
+  lock_acquire (&frame_lock);
   list_remove (&entry->frame_elem);
+  lock_release (&frame_lock);
 }
 
 /* Choose a victim frame from the frame table, by random strategy. */
