@@ -8,9 +8,8 @@
 
 >> Fill in the names and email addresses of your group members.
 
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
+Haotian Jing <email@domain.example>
+Qitan Long <longqt@shanghaitech.edu.cn>
 
 ---- PRELIMINARIES ----
 
@@ -21,6 +20,18 @@ FirstName LastName <email@domain.example>
 >> preparing your submission, other than the Pintos documentation, course
 >> text, lecture notes, and course staff.
 
+- Pintos Project #3 Virtual Memory
+  Virginia Tech
+  https://courses.cs.vt.edu/~cs3204/fall2009/pintos-vt-local/Project3Session.pdf
+
+- Project 3: Virtual Memory
+  SKK University (성균관대학교)
+  http://csl.skku.edu/uploads/SSE3044F10/project3.pdf
+
+- Operating Systems: Three Easy Pieces
+  Remzi H. Arpaci-Dusseau and Andrea C. Arpaci-Dusseau
+  https://pages.cs.wisc.edu/~remzi/OSTEP/
+
             PAGE TABLE MANAGEMENT
             =====================
 
@@ -30,24 +41,195 @@ FirstName LastName <email@domain.example>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+> In `src/vm/page.h`
+
+```c
+/* States of a page. */
+enum supp_state
+{
+  NOT_LOADED, /* Not loaded into memory. */
+  LOADED,     /* Loaded into memory. */
+  SWAPPED,    /* Swapped out of memory. */
+};
+```
+
+- This enum saves states, or lifecycles, of a page.
+
+```c
+/* Types of a page. */
+enum supp_type
+{
+  SUPP_NORMAL, /* A normal page. */
+  SUPP_ZERO,   /* A normal page with all bytes zeroed. */
+  SUPP_CODE,   /* Containing executable code. */
+  SUPP_MMAP,   /* Containing a file mapped into memory. */
+};
+```
+
+- This enum saves types of a page, different types of pages need different
+  actions to change states.
+
+```c
+struct supp_entry
+{
+  enum supp_state state; /* state of the page */
+  enum supp_type type;   /* type of the page */
+
+  void *kpage; /* kernel virtual address of the page */
+  void *upage; /* user virtual address of the page */
+  struct thread *owner; /* thread that owns the page */
+
+  bool writable;        /* is the page writable? */
+  bool pinned;          /* is the page pinned? */
+  bool dirty;           /* is the page dirty? */
+
+  struct hash_elem supp_elem;  /* supplemental entry hash element */
+  struct list_elem frame_elem; /* frame entry list element */
+
+  /* For page containing file. */
+  struct file *file; /* file containing the page */
+  off_t ofs;         /* offset of the page in the file */
+  size_t read_bytes; /* number of bytes read from the page */
+  size_t zero_bytes; /* number of bytes zeroed in the page */
+};
+```
+
+- This is the supplemental page table entry,
+  and also being used as frame entry.
+
+```c
+struct supp_table
+{
+  struct hash hash; /* hash table */
+};
+```
+
+- This is the supplemental page table for a process,
+  which contains a hash table.
+
+> In `src/vm/frame.c`
+
+```c
+/* Frame table. */
+struct list frame_table;
+```
+
+- This is the global frame table.
+  Access to this table is done indirectly through functions.
+
+```c
+/* Lock for frame table. */
+struct lock frame_lock;
+```
+
+- This is the lock for the frame table.
+  Acquiring this lock is required before modifying the frame table.
+
+> In `src/userprog/process.h`
+
+```c
+typedef int fd_t;
+#define FD_ERROR ((fd_t)-1)
+
+typedef int mapid_t;
+#define MAP_FAILED ((mapid_t)-1)
+```
+
+- These are the file descriptor and mmap id types,
+  we add them for convenience and clarity.
+
+```c
+/* 8 MB of user stack. */
+#define USER_STACK_SIZE (8 * 1024 * 1024)
+#define USER_STACK_BOTTOM (PHYS_BASE - USER_STACK_SIZE)
+```
+
+- These constants are used in exception handling,
+  to determine if the stack pointer is in the user stack.
+
+```diff
+ struct process
+ {
+   struct thread *thread;
+   char name[16];
+
+   pid_t pid;     /* Process Id */
+   int exit_code; /* Exit status. */
+
+   struct file **fd_table; /* File descriptor table. */
+   int fd_count;           /* Number of open files. */
+
+   struct process *parent;      /* Parent process. */
+   struct list chilren;         /* List of child processes. */
+   struct list_elem child_elem; /* List element for children list. */
+
+   bool load_success; /* Whether the process was loaded successfully. */
+
+   struct semaphore load_sema; /* Semaphore for loading. */
+   struct semaphore wait_sema; /* Semaphore for waiting. */
+   struct semaphore exit_sema; /* Semaphore for exiting. */
+
+   struct file *executable; /* Executable file. */
+
++  struct supp_table supp_table; /* Supplemental page table. */
++  void *esp; /* Stack pointer, used for save esp in syscall */
+ };
+```
+
+- `supp_table` saves supplemental page table for a process.
+- `esp` saves stack pointer, used for recover esp when exception occurs
+  in syscall.
+
+> In `src/userprog/process.c`
+
+```diff
++/* File system lock.
++   Acquire this lock before accessing the file system to prevent
++   synchronization issues. */
++struct lock filesys_lock;
+```
+
+This is the lock for accessing the file system.
+
 ---- ALGORITHMS ----
 
 >> A2: In a few paragraphs, describe your code for locating the frame,
 >> if any, that contains the data of a given page.
 
+The frame entry is unified with the supplemental page entry,
+so accessing data of a page is done by accessing the corresponding
+page table entry.
+
 >> A3: How does your code coordinate accessed and dirty bits between
 >> kernel and user virtual addresses that alias a single frame, or
 >> alternatively how do you avoid the issue?
+
+We avoid the issue by always use user virtual address to access
+the page table entry. Since we don't share the kernel virtual address,
+there is no problem.
 
 ---- SYNCHRONIZATION ----
 
 >> A4: When two user processes both need a new frame at the same time,
 >> how are races avoided?
 
+Add a new frame means allocate it and then install it to frame table.
+These are done in `frame_allocate` and `frame_install` separately.
+There are no synchronization problem in in allocation. During 
+install the frame, we use a lock `frame_lock` to prevent other
+processes from installing.
+
 ---- RATIONALE ----
 
 >> A5: Why did you choose the data structure(s) that you did for
 >> representing virtual-to-physical mappings?
+
+For page table, we use hash table with user page as key, because
+in page fault, we need to find the page table entry by `uaddr`.
+
+For frame table, it's actually a list of loaded frames.
+There is no need to use hash table, since it's used for easily evict
+a frame when memory is full.
 
                PAGING TO AND FROM DISK
                =======================
@@ -58,18 +240,98 @@ FirstName LastName <email@domain.example>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+> In `src/vm/page.h`
+
+```diff
+ struct supp_entry
+ {
+   ...
+
+   struct hash_elem supp_elem;  /* supplemental entry hash element */
+   struct list_elem frame_elem; /* frame entry list element */
+
++  /* For swapped page. */
++  size_t swap_index; /* index of the page in the swap file */
+
+   ...
+ };
+```
+
+We save swap index in the supplemental page table entry,
+so we can locate the page in the swap block.
+
+> In `src/vm/swap.h`
+
+```c
+/* Number of sectors we need to save a page. */
+#define PAGE_SECTOR_COUNT (PGSIZE / BLOCK_SECTOR_SIZE)
+```
+
+This is the number of pages we need to save a page.
+
+> In `src/vm/swap.c`
+
+```c
+/* The swap block device. */
+struct block *swap_block;
+```
+
+This is the swap block device, 
+initialized from block with BLOCK_SWAP role.
+
+```c
+/* The swap bitmap.
+   A bit is set if the corresponding page is in swap. */
+struct bitmap *swap_bitmap;
+```
+
+This bitmap saves whether a page is in use or not.
+
+```c
+/* Number of sectors in swap block. */
+block_sector_t swap_sector_count;
+```
+
+This saves the number of sectors in the swap block.
+
+```c
+/* Number of sectors we can save in swap block. */
+size_t swap_page_count;
+```
+
+This saves the number of pages we can save in the swap block.
+
 ---- ALGORITHMS ----
 
 >> B2: When a frame is required but none is free, some frame must be
 >> evicted.  Describe your code for choosing a frame to evict.
 
+We yse second chance algorithm to choose a frame to evict.
+That is, pop each frame from front, and push it to back if
+- the frame is accessed
+- the frame is pinned.
+If the frame is accessed, we set the accessed bit to 0 before
+pushing it to back. If the frame is not accessed, we choose
+this frame to evict.
+
 >> B3: When a process P obtains a frame that was previously used by a
 >> process Q, how do you adjust the page table (and any other data
 >> structures) to reflect the frame Q no longer has?
 
+We make sure this by following properties:
+- When an entry is not loaded, it does not exist in the frame table.
+- When an entry is loaded, it must be in the frame table.
+
 >> B4: Explain your heuristic for deciding whether a page fault for an
 >> invalid virtual address should cause the stack to be extended into
 >> the page that faulted.
+
+An address should cause the stack to be extended if
+- It's `esp` is in the user stack.
+- The fault address is in the user stack.
+- The fault address is a user virtual address.
+- The fault address is above `esp - 32`, because it's the maximum
+  stack extend size.
 
 ---- SYNCHRONIZATION ----
 
@@ -78,10 +340,17 @@ FirstName LastName <email@domain.example>
 >> textbook for an explanation of the necessary conditions for
 >> deadlock.)
 
+When accessing the frame table, we use lock `frame_lock` to prevent
+concurrent access. However, the program will in infinite loop if all
+frames are pinned.
+
 >> B6: A page fault in process P can cause another process Q's frame
 >> to be evicted.  How do you ensure that Q cannot access or modify
 >> the page during the eviction process?  How do you avoid a race
 >> between P evicting Q's frame and Q faulting the page back in?
+
+We ensure this by using `frame_lock`, so that during eviction process
+it's not possible for another modification to happen.
 
 >> B7: Suppose a page fault in process P causes a page to be read from
 >> the file system or swap.  How do you ensure that a second process Q
@@ -111,6 +380,51 @@ FirstName LastName <email@domain.example>
 >> C1: Copy here the declaration of each new or changed `struct' or
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
+
+> In `src/vm/mmap.h`
+
+```diff
++struct mmap_file
++{
++  struct file *file;
++  void *uaddr;
++  size_t page_cnt;
++};
+```
+
+> In `src/userprog/process.h`
+
+```diff
+ struct process
+ {
+   struct thread *thread;
+   char name[16];
+
+   pid_t pid;     /* Process Id */
+   int exit_code; /* Exit status. */
+
+   struct file **fd_table; /* File descriptor table. */
+   int fd_count;           /* Number of open files. */
+
++  struct mmap_file **mmap_table; /* Memory-mapped file table. */
++  int mmap_count;                /* Number of memory-mapped files. */
+
+   struct process *parent;      /* Parent process. */
+   struct list chilren;         /* List of child processes. */
+   struct list_elem child_elem; /* List element for children list. */
+
+   bool load_success; /* Whether the process was loaded successfully. */
+
+   struct semaphore load_sema; /* Semaphore for loading. */
+   struct semaphore wait_sema; /* Semaphore for waiting. */
+   struct semaphore exit_sema; /* Semaphore for exiting. */
+
+   struct file *executable; /* Executable file. */
+
+   struct supp_table supp_table; /* Supplemental page table. */
+   void *esp; /* Stack pointer, used for save esp in syscall */
+ };
+```
 
 ---- ALGORITHMS ----
 
