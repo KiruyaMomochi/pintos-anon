@@ -594,7 +594,6 @@ write (int fd, const void *buffer, unsigned size)
   int write_size;
   check_address (buffer);
 
-  struct process* p = process_current();
   if (fd == STDOUT_FILENO)
     {
       write_size = write_stdout (buffer, size);
