@@ -105,6 +105,27 @@
         "cstdbool": "c",
         "console.h": "c",
         "inode.h": "c",
-        "off_t.h": "c"
+        "off_t.h": "c",
+        "process.h": "c",
+        "stdlib.h": "c",
+        "hash.h": "c",
+        "ctype.h": "c",
+        "directory.h": "c",
+        "colord.h": "c",
+        "frame.h": "c",
+        "boundary.h": "c",
+        "syn-read.h": "c",
+        "round.h": "c",
+        "mmap.h": "c",
+        "page.h": "c",
+        "swap.h": "c",
+        "shutdown.h": "c",
+        "pagedir.h": "c",
+        "seq-test.h": "c",
+        "unistd.h": "c",
+        "lib.h": "c",
+        "bitset": "c",
+        "tss.h": "c",
+        "cache.h": "c"
     }
 }
