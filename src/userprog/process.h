@@ -47,7 +47,7 @@ pid_t process_create (struct thread *t);
 int process_allocate_fd (struct file *);
 struct file *process_get_file (int);
 void process_free_fd (int fd);
-struct process * process_find (pid_t pid);
+struct process *process_find (pid_t pid);
 
 pid_t tid_to_pid (tid_t tid);
 tid_t pid_to_tid (pid_t pid);

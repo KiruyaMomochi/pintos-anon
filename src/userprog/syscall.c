@@ -374,11 +374,17 @@ syscall_handler (struct intr_frame *f)
         int fd = *(sp + 1);
         const void *buffer = (const void *)*(sp + 2);
         unsigned size = *(sp + 3);
-        DEBUG_PRINT_SYSCALL_START ("(%s (%d, %p, %d))", syscall, fd, buffer,
-                                   size);
+        if (fd >= 2)
+          {
+            DEBUG_PRINT_SYSCALL_START ("(%s (%d, %p, %d))", syscall, fd,
+                                       buffer, size);
+          }
         ret = write (fd, buffer, size);
-        DEBUG_PRINT_SYSCALL_END ("[%s (%d, %p, %d) -> %d]", syscall, fd,
-                                 buffer, size, ret);
+        if (fd >= 2)
+          {
+            DEBUG_PRINT_SYSCALL_END ("[%s (%d, %p, %d) -> %d]", syscall, fd,
+                                     buffer, size, ret);
+          }
         break;
       }
     case SYS_SEEK:
@@ -455,10 +461,10 @@ write_stdout (const void *buffer, unsigned size)
   return size;
 }
 
-/* Terminates the current user program, returning STATUS to the kernel.
-   If the process's parent waits for it (see below), this is the status
-   that will be returned. Conventionally, a status of 0 indicates success
-   and nonzero values indicate errors. */
+/* Terminates the current user program, returning STATUS to the
+   kernel. If the process's parent waits for it (see below), this
+   is the status that will be returned. Conventionally, a status of
+   0 indicates success and nonzero values indicate errors. */
 static void
 exit (int status)
 {
@@ -470,9 +476,9 @@ exit (int status)
   thread_exit ();
 }
 
-/* Runs the executable whose name is given in CMD_LINE, passing any given
-   arguments, and returns the new process's program id (pid). If the program
-   cannot load or run for any reason, returns -1. */
+/* Runs the executable whose name is given in CMD_LINE, passing any
+   given arguments, and returns the new process's program id (pid).
+   If the program cannot load or run for any reason, returns -1. */
 static pid_t
 exec (const char *cmd_line)
 {
@@ -501,11 +507,11 @@ exec (const char *cmd_line)
   return pid;
 }
 
-/* Waits for a child process PID and retrieves the child's exit status.
-   If PID is still alive, waits until it terminates. Then, returns the
-   status that pid passed to exit. If pid did not call exit(), but was
-   terminated by the kernel (e.g. killed due to an exception), wait(pid)
-   returns -1. */
+/* Waits for a child process PID and retrieves the child's exit
+   status. If PID is still alive, waits until it terminates. Then,
+   returns the status that pid passed to exit. If pid did not call
+   exit(), but was terminated by the kernel (e.g. killed due to an
+   exception), wait(pid) returns -1. */
 static int
 wait (pid_t pid)
 {
@@ -516,8 +522,8 @@ wait (pid_t pid)
 }
 
 /* Creates a file called FILE initially INITIAL_SIZE bytes in size.
-   Returns true if successful, false otherwise. Creating a file does not
-   open it. To open a file, use open(). */
+   Returns true if successful, false otherwise. Creating a file does
+   not open it. To open a file, use open(). */
 static bool
 create (const char *file, unsigned initial_size)
 {
@@ -526,9 +532,10 @@ create (const char *file, unsigned initial_size)
   return filesys_create (file, initial_size);
 }
 
-/* Deletes the file called FILE. Returns true if successful, false
-   otherwise. A file may be removed regardless of whether it is open or
-   closed, and removing an open file does not close it. */
+/* Deletes the file or an empty folder called FILE. Returns true if
+   successful, false otherwise. A file may be removed regardless of
+   whether it is open or closed, and removing an open file does not
+   close it. */
 static bool
 remove (const char *file)
 {
@@ -561,9 +568,10 @@ filesize (int fd)
   return file_length (f);
 }
 
-/* Reads SIZE bytes from the file open as FD into BUFFER. Returns the
-   number of bytes actually read (0 at end of file), or -1 if the file
-   could not be read (due to a condition other than end of file). */
+/* Reads SIZE bytes from the file open as FD into BUFFER. Returns
+   the number of bytes actually read (0 at end of file), or -1 if
+   the file could not be read (due to a condition other than end
+   of file). */
 static int
 read (int fd, void *buffer, unsigned size)
 {
@@ -585,9 +593,9 @@ read (int fd, void *buffer, unsigned size)
     }
 }
 
-/* Writes SIZE bytes from BUFFER to the open file FD. Returns the number
-   of bytes actually written, which may be less than SIZE if some bytes
-   could not be written. */
+/* Writes SIZE bytes from BUFFER to the open file FD. Returns the
+   number of bytes actually written, which may be less than SIZE if
+   some bytes could not be written. */
 static int
 write (int fd, const void *buffer, unsigned size)
 {
@@ -612,8 +620,8 @@ write (int fd, const void *buffer, unsigned size)
 }
 
 /* Changes the next byte to be read or written in open file FD to
-   position POSITION, expressed as a byte offset from the beginning of
-   the file. (Thus, a position of 0 is the file's start.) */
+   position POSITION, expressed as a byte offset from the beginning
+   of the file. (Thus, a position of 0 is the file's start.) */
 static void
 seek (int fd, unsigned position)
 {
@@ -621,8 +629,9 @@ seek (int fd, unsigned position)
   file_seek (f, position);
 }
 
-/* Returns the position of the next byte to be read or written in open
-   file FD, expressed in bytes from the beginning of the file. */
+/* Returns the position of the next byte to be read or written in
+   open file FD, expressed in bytes from the beginning of the
+   file. */
 static unsigned
 tell (int fd)
 {

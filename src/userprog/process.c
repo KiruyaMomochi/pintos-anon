@@ -183,7 +183,7 @@ process_exit (void)
     }
 
   /* Close all opened files */
-  for (size_t fd = 2; fd < p->fd_count; fd++)
+  for (int fd = 2; fd < p->fd_count; fd++)
     {
       if (p->fd_table[fd] == NULL)
         continue;
