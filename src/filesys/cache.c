@@ -200,7 +200,7 @@ filesys_block_read (block_sector_t sector, void *buffer)
     filesys_prefetch (sector + 1);
 
   memcpy (buffer, elem->data, BLOCK_SECTOR_SIZE);
-  
+
   lock_release (&filesys_cache_lock);
 }
 
@@ -225,11 +225,11 @@ filesys_block_read_bytes (block_sector_t sector, void *buffer, off_t ofs,
 
   struct block_cache_elem *elem = filesys_cache_access (sector, true);
 
-  /* If cache accessing fails, we panics because our malloc may not 
+  /* If cache accessing fails, we panics because our malloc may not
      succeed too. */
   if (elem == NULL)
     PANIC ("filesys_block_read_bytes: cache access failed");
-  
+
   memcpy (buffer, elem->data + ofs, bytes);
 
   lock_release (&filesys_cache_lock);
