@@ -896,3 +896,10 @@ inode_is_dir (const struct inode *inode)
 {
   return inode->data.is_dir;
 }
+
+/* Returns true if INODE is removed, false if it is not. */
+bool
+inode_is_removed (const struct inode *inode)
+{
+  return inode->removed;
+}

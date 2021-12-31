@@ -797,3 +797,23 @@ process_free_fd (int fd)
   ASSERT (p->fd_table[fd] != NULL);
   p->fd_table[fd] = NULL;
 }
+
+bool
+process_chdir (const char *dir)
+{
+  ASSERT (dir != NULL);
+
+  struct dir *opened_dir = filesys_open_dir (dir);
+  if (opened_dir == NULL)
+    return false;
+
+  struct process *p = process_current ();
+  if (p->current_dir != NULL)
+  {
+    dir_close (p->current_dir);
+    p->current_dir = NULL;    
+  }
+
+  p->current_dir = opened_dir;
+  return true;
+}

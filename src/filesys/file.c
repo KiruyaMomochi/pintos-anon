@@ -94,6 +94,10 @@ file_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs)
 off_t
 file_write (struct file *file, const void *buffer, off_t size)
 {
+  /* A directory should not be written to by file methods. */
+  if (inode_is_dir (file_get_inode (file)))
+      return -1;
+    
   off_t bytes_written = inode_write_at (file->inode, buffer, size, file->pos);
   file->pos += bytes_written;
   return bytes_written;
@@ -165,4 +169,25 @@ file_tell (struct file *file)
 {
   ASSERT (file != NULL);
   return file->pos;
+}
+
+/* Returns the INODE number for FILE, which may represent an ordinary
+   file or a directory.
+
+   In Pintos, the sector number of the inode is suitable for use as
+   an inode number.*/
+int
+file_inumber (struct file *file)
+{
+  ASSERT (file != NULL);
+  return inode_get_inumber (file->inode);
+}
+
+/* Returns true if FILE is a directory, false if it represents an
+   ordinary file. */
+bool
+file_is_dir (struct file *file)
+{
+  ASSERT (file != NULL);
+  return inode_is_dir (file->inode);
 }

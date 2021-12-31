@@ -37,6 +37,8 @@ struct dir *
 dir_open (struct inode *inode)
 {
   ASSERT (inode != NULL);
+  ASSERT (inode_is_dir (inode));
+
   struct dir *dir = calloc (1, sizeof *dir);
   if (inode != NULL && dir != NULL)
     {
@@ -84,6 +86,25 @@ struct inode *
 dir_get_inode (struct dir *dir)
 {
   return dir->inode;
+}
+
+/* Returns true if the directory DIR is empty, false otherwise. */
+bool
+dir_is_empty (struct dir *dir)
+{
+  struct dir_entry e;
+  size_t ofs;
+
+  ASSERT (dir != NULL);
+
+  for (ofs = 0; inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
+       ofs += sizeof e)
+    if (e.in_use)
+      {
+        return false;
+      }
+
+  return true;
 }
 
 /* Searches DIR for a file with the given NAME.
@@ -235,4 +256,40 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
         }
     }
   return false;
+}
+
+/* Return working directory of current process. */
+const struct dir *
+current_dir (void)
+{
+  struct thread *t = thread_current ();
+  if (t->process == NULL)
+    return NULL;
+  if (t->process->current_dir == NULL)
+    return NULL;
+  return t->process->current_dir;
+}
+
+/* Open tworkinghe directory for current process. */
+struct dir *
+dir_open_current (void)
+{
+  struct dir *dir = NULL;
+  struct thread *t = thread_current ();
+  if (t->process == NULL || t->process->current_dir == NULL)
+    {
+      dir = dir_open_root ();
+    }
+  else
+    {
+      dir = dir_reopen (t->process->current_dir);
+
+      /* Deny opening a directory that is removed. */
+      if (dir == NULL || inode_is_removed (dir_get_inode (dir)))
+        {
+          dir_close (dir);
+          return NULL;
+        }
+    }
+  return dir;
 }

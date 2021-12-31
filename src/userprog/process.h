@@ -5,8 +5,9 @@
 typedef int pid_t;
 #define PID_ERROR ((pid_t)-1)
 
-#include "threads/thread.h"
+#include "filesys/directory.h"
 #include "threads/synch.h"
+#include "threads/thread.h"
 
 struct process
 {
@@ -30,6 +31,8 @@ struct process
   struct semaphore exit_sema; /* Semaphore for exiting. */
 
   struct file *executable; /* Executable file. */
+
+  struct dir *current_dir; /* Current working directory. */
 };
 
 tid_t process_execute (const char *file_name);
@@ -48,6 +51,8 @@ int process_allocate_fd (struct file *);
 struct file *process_get_file (int);
 void process_free_fd (int fd);
 struct process *process_find (pid_t pid);
+
+bool process_chdir (const char *dir);
 
 pid_t tid_to_pid (tid_t tid);
 tid_t pid_to_tid (pid_t pid);

@@ -1,6 +1,7 @@
 #ifndef FILESYS_FILE_H
 #define FILESYS_FILE_H
 
+#include <stdbool.h>
 #include "filesys/off_t.h"
 
 struct inode;
@@ -10,6 +11,8 @@ struct file *file_open (struct inode *);
 struct file *file_reopen (struct file *);
 void file_close (struct file *);
 struct inode *file_get_inode (struct file *);
+int file_inumber (struct file *file);
+bool file_is_dir (struct file *file);
 
 /* Reading and writing. */
 off_t file_read (struct file *, void *, off_t);
