@@ -2,8 +2,10 @@
 #include "debug.h"
 #include "devices/input.h"
 #include "devices/shutdown.h"
-#include "filesys/filesys.h"
+#include "filesys/directory.h"
 #include "filesys/file.h"
+#include "filesys/filesys.h"
+#include "filesys/inode.h"
 #include "kernel/debug.h"
 #include "pagedir.h"
 #include "threads/init.h"
@@ -16,7 +18,6 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 
-// TODO: Use this lock to keep synchronization
 static struct lock filesys_lock; /* Lock for file system operations */
 
 static void syscall_handler (struct intr_frame *);
@@ -33,6 +34,11 @@ static int write (int fd, const void *buffer, unsigned size);
 static void seek (int fd, unsigned position);
 static unsigned tell (int fd);
 static void close (int fd);
+static bool chdir (const char *dir);
+static bool mkdir (const char *dir);
+static bool readdir (int fd, char *name);
+static bool isdir (int fd);
+static int inumber (int fd);
 
 #ifdef DEBUG_KERNEL
 #define DEBUG_PRINT_SYSCALL_START(...)                                        \
@@ -412,6 +418,48 @@ syscall_handler (struct intr_frame *f)
         DEBUG_PRINT_SYSCALL_END ("[%s (%d)]", syscall, fd);
         break;
       }
+    case SYS_CHDIR:
+      {
+        char *dir = (char *)*(sp + 1);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%s))", syscall, dir);
+        ret = chdir (dir);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%s) -> %d]", syscall, dir, ret);
+        break;
+      }
+    case SYS_MKDIR:
+      {
+        char *dir = (char *)*(sp + 1);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%s))", syscall, dir);
+        ret = mkdir (dir);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%s) -> %d]", syscall, dir, ret);
+        break;
+      }
+    case SYS_READDIR:
+      {
+        int fd = *(sp + 1);
+        char *name = (char *)*(sp + 2);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%d, %p))", syscall, fd, name);
+        ret = readdir (fd, name);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%d, %p) -> %d]", syscall, fd, name,
+                                 ret);
+        break;
+      }
+    case SYS_ISDIR:
+      {
+        int fd = *(sp + 1);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%d))", syscall, fd);
+        ret = isdir (fd);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%d) -> %d]", syscall, fd, ret);
+        break;
+      }
+    case SYS_INUMBER:
+      {
+        int fd = *(sp + 1);
+        DEBUG_PRINT_SYSCALL_START ("(%s (%d))", syscall, fd);
+        ret = inumber (fd);
+        DEBUG_PRINT_SYSCALL_END ("[%s (%d) -> %d]", syscall, fd, ret);
+        break;
+      }
     default:
       PANIC (COLOR_RED "Unknown system call %s" COLOR_RESET, syscall);
       ret = -1;
@@ -651,4 +699,94 @@ close (int fd)
     }
   file_close (f);
   process_free_fd (fd);
+}
+
+/* Changes the current working directory of the process to DIR.
+   Returns true if successful, false on failure. */
+static bool
+chdir (const char *dir)
+{
+  check_string (dir);
+
+  return process_chdir (dir);
+}
+
+/* Creates a new directory named DIR, which may be relative or
+   absolute. Returns true if successful, false on failure.
+
+   Fails if DIR already exists or if any directory name in DIR,
+   besides the last, does not already exist. That is, mkdir("/a/b/c")
+   succeeds only if /a/b already exists and /a/b/c does not. */
+static bool
+mkdir (const char *dir)
+{
+  check_string (dir);
+
+  return filesys_create_dir (dir);
+}
+
+/* Reads a directory entry from file descriptor FD, which must
+   represent a directory. If successful, stores the null-terminated
+   file name in NAME, which must have room for READDIR_MAX_LEN + 1
+   bytes, and returns true. Otherwise, returns false.
+
+   "." and ".." should not be returned by readdir.
+
+   If the directory changes while it is open, then it is acceptable
+   for some entries not to be read at all or to be read multiple
+   times. Otherwise, each directory entry should be read once, in
+   any order. */
+static bool
+readdir (int fd, char *name)
+{
+  check_address (name);
+
+  struct file *f = process_get_file (fd);
+  if (f == NULL)
+    {
+      DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[open %d failed]", fd);
+      thread_exit ();
+    }
+
+  if (!file_is_dir (f))
+    {
+      DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[%d is not a directory]", fd);
+      thread_exit ();
+    }
+
+  // HACK: Although dir_readdir is expecting a dir *, passing a
+  // file * should "just work" because the consistency of theses
+  // two structures.
+  return dir_readdir ((struct dir *)f, name);
+}
+
+/* Returns true if FD represents a directory, false if it
+   represents an ordinary file. */
+static bool
+isdir (int fd)
+{
+  struct file *f = process_get_file (fd);
+  if (f == NULL)
+    {
+      DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[open %d failed]", fd);
+      thread_exit ();
+    }
+  return file_is_dir (f);
+}
+
+/* Returns the INODE number of the inode associated with the file
+   descriptor FD, which may represent an ordinary file or a directory.
+
+   An inode number persistently identifies a file or directory. It is
+   unique during the file's existence. */
+static int
+inumber (int fd)
+{
+  struct file *f = process_get_file (fd);
+  if (f == NULL)
+    {
+      DEBUG_PRINT_SYSCALL_END (COLOR_HRED "[open %d failed]", fd);
+      thread_exit ();
+    }
+  return file_inumber (f);
 }
