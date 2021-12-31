@@ -15,7 +15,7 @@ static void do_format (void);
 /* Initializes the file system module.
    If FORMAT is true, reformats the file system. */
 void
-filesys_init (bool format) 
+filesys_init (bool format)
 {
   fs_device = block_get_role (BLOCK_FILESYS);
   if (fs_device == NULL)
@@ -24,7 +24,7 @@ filesys_init (bool format)
   inode_init ();
   free_map_init ();
 
-  if (format) 
+  if (format)
     do_format ();
 
   free_map_open ();
@@ -33,7 +33,7 @@ filesys_init (bool format)
 /* Shuts down the file system module, writing any unwritten data
    to disk. */
 void
-filesys_done (void) 
+filesys_done (void)
 {
   free_map_close ();
 }
@@ -81,7 +81,7 @@ filesys_open (const char *name)
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
 bool
-filesys_remove (const char *name) 
+filesys_remove (const char *name)
 {
   struct dir *dir = dir_open_root ();
   bool success = dir != NULL && dir_remove (dir, name);
