@@ -43,6 +43,9 @@ static struct lock filesys_cache_lock;
 /* Tick counter for file system cache. */
 static int64_t ticks;
 
+/* The next write operation should be synchronized. */
+static bool sync_write = false;
+
 /* Initialize file system cache. */
 void
 filesys_cache_init (void)
@@ -268,6 +271,12 @@ filesys_block_write (block_sector_t sector, const void *buffer)
   memcpy (elem->data, buffer, BLOCK_SECTOR_SIZE);
   elem->dirty = true;
 
+  if (sync_write)
+    {
+      filesys_sync_nolock ();
+      sync_write = false;
+    }
+
   lock_release (&filesys_cache_lock);
 }
 
@@ -295,6 +304,12 @@ filesys_block_write_bytes (block_sector_t sector, const void *buffer,
   struct block_cache_elem *elem = filesys_cache_access (sector, true);
   memcpy (elem->data + ofs, buffer, bytes);
   elem->dirty = true;
+
+  if (sync_write)
+    {
+      filesys_sync_nolock ();
+      sync_write = false;
+    }
 
   lock_release (&filesys_cache_lock);
 }
@@ -329,13 +344,7 @@ filesys_cache_disable (void)
 void
 filesys_cache_tick (void)
 {
-  if (lock_held_by_any_thread (&filesys_cache_lock))
-    return;
-
   ticks++;
   if (ticks % FILESYS_CACHE_TICKS == 0)
-    {
-      if (cache_enabled)
-        filesys_sync_nolock ();
-    }
+    sync_write = true;
 }
