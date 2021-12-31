@@ -6,7 +6,6 @@
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "utils/colors.h"
-#include "vm/page.h"
 #include <inttypes.h>
 #include <kernel/debug.h>
 #include <stdio.h>
@@ -114,17 +113,6 @@ kill (struct intr_frame *f)
     }
 }
 
-/* Returns true if ESP and FAULT_ADDR are considered to be valid
-   values for a stack fault.  */
-static bool
-is_stack (void *esp, void *fault_addr)
-{
-  if (esp <= USER_STACK_BOTTOM || fault_addr <= USER_STACK_BOTTOM)
-    return false;
-
-  return (fault_addr >= esp - 32 && fault_addr < PHYS_BASE);
-}
-
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.
@@ -176,8 +164,10 @@ page_fault (struct intr_frame *f)
 
   /* Always fail if rights violation occurs. */
   if (!not_present)
-    goto fail;
-
+    {
+      DEBUG_PRINT (COLOR_RED "Rights violation.");
+      thread_exit ();
+    }
 
   if (!user)
     {
