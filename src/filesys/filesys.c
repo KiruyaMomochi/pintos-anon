@@ -1,11 +1,16 @@
 #include "filesys/filesys.h"
-#include <debug.h>
-#include <stdio.h>
-#include <string.h>
+#include "filesys/cache.h"
+#include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
-#include "filesys/directory.h"
+#include "path.h"
+#include "threads/malloc.h"
+#include "threads/thread.h"
+#include "userprog/process.h"
+#include <debug.h>
+#include <stdio.h>
+#include <string.h>
 
 /* Partition that contains the file system. */
 struct block *fs_device;
