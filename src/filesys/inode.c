@@ -888,3 +888,11 @@ inode_length (const struct inode *inode)
 {
   return inode->data.length;
 }
+
+/* Returns true if INODE is a directory, false if it represents an
+   ordinary file. */
+bool
+inode_is_dir (const struct inode *inode)
+{
+  return inode->data.is_dir;
+}

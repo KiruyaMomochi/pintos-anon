@@ -69,6 +69,13 @@ process_execute (const char *file_name)
   ASSERT (t != NULL);
 
   t->process->parent = cur->process;
+  
+  if (cur->process->current_dir != NULL)
+    {
+      struct dir *dir = dir_reopen (cur->process->current_dir);
+      t->process->current_dir = dir;
+    }
+
   list_push_back (&(cur->process->chilren), &(t->process->child_elem));
   return tid;
 }
@@ -195,6 +202,7 @@ process_exit (void)
   free (p->fd_table);
 
   file_close (p->executable);
+  dir_close (p->current_dir);
 
   if (has_parent)
     {
@@ -710,6 +718,7 @@ init_process (struct process *p)
 
   p->parent = NULL;
   p->executable = NULL;
+  p->current_dir = NULL;
 }
 
 /* Returns the name of the running process. */
