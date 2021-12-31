@@ -109,12 +109,6 @@ palloc_get_multiple (enum palloc_flags flags, size_t page_cnt)
   else
     pages = NULL;
 
-  if ((flags & PAL_USER))
-    {
-      DEBUG_PRINT ("flags = %s, page_cnt = %d -> %p",
-                    palloc_flags_to_str (flags), page_cnt, pages);
-    }
-
   if (pages != NULL)
     {
       if (flags & PAL_ZERO)
