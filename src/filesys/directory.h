@@ -29,5 +29,6 @@ bool dir_remove (struct dir *, const char *name);
 bool dir_readdir (struct dir *, char name[NAME_MAX + 1]);
 bool dir_is_empty (struct dir *dir);
 const struct dir *current_dir (void);
+bool dir_add_dot (struct dir *parent, struct dir *base);
 
 #endif /* filesys/directory.h */

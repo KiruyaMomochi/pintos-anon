@@ -359,6 +359,13 @@ do_format (void)
   free_map_create ();
   if (!dir_create (ROOT_DIR_SECTOR, 16))
     PANIC ("root directory creation failed");
+
+  /* Open the root directory, adding . and .. */  
+  struct dir *dir = dir_open_root ();
+  if (dir == NULL || !dir_add_dot (dir, dir))
+    PANIC ("root directory dot files creation failed");
+  dir_close (dir);
+
   free_map_close ();
   printf ("done.\n");
 }

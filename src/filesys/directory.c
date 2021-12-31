@@ -7,6 +7,9 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Constants for . and .. */
+static const char dot[2] = ".";
+static const char dotdot[3] = "..";
 
 /* A directory. */
 struct dir
@@ -101,6 +104,9 @@ dir_is_empty (struct dir *dir)
        ofs += sizeof e)
     if (e.in_use)
       {
+        /* Skip dot and dotdot entries. */
+        if (strcmp (e.name, dot) == 0 || strcmp (e.name, dotdot) == 0)
+          continue;
         return false;
       }
 
@@ -224,6 +230,16 @@ dir_remove (struct dir *dir, const char *name)
   if (inode == NULL)
     goto done;
 
+  /* Don't remove directory with files in it. */
+  if (inode_is_dir (inode))
+    {
+      struct dir *dir_inode = dir_open (inode);
+      bool empty = dir_is_empty (dir_inode);
+      dir_close (dir_inode);
+      if (!empty)
+        goto done;
+    }
+
   /* Erase directory entry. */
   e.in_use = false;
   if (inode_write_at (dir->inode, &e, sizeof e, ofs) != sizeof e)
@@ -251,6 +267,10 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
       dir->pos += sizeof e;
       if (e.in_use)
         {
+          /* Skip dot entries. */
+          if (strcmp (e.name, dot) == 0 || strcmp (e.name, dotdot) == 0)
+            continue;
+
           strlcpy (name, e.name, NAME_MAX + 1);
           return true;
         }
@@ -292,4 +312,30 @@ dir_open_current (void)
         }
     }
   return dir;
+}
+
+/* Add dot and dotdot entries to the directory DIR, whose parent
+   is PARENT. */
+bool
+dir_add_dot (struct dir *parent, struct dir *dir)
+{
+  ASSERT (parent != NULL);
+  ASSERT (dir != NULL);
+  ASSERT (parent->inode != NULL);
+  ASSERT (dir->inode != NULL);
+
+  bool success = false;
+
+  success = dir_add (dir, dot, inode_get_inumber (dir_get_inode (dir)));
+  if (!success)
+    return false;
+
+  success = dir_add (dir, dotdot, inode_get_inumber (dir_get_inode (parent)));
+  if (!success)
+    {
+      dir_remove (dir, dot);
+      return false;
+    }
+
+  return true;
 }
