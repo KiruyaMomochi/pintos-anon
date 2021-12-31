@@ -3,6 +3,8 @@
 #include "filesys/filesys.h"
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
+#include "threads/synch.h"
+#include "threads/thread.h"
 #include <debug.h>
 #include <list.h>
 #include <round.h>
@@ -58,6 +60,9 @@ struct inode
   bool removed;           /* True if deleted, false otherwise. */
   int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
   struct inode_disk data; /* Inode content. */
+
+  struct lock inode_lock; /* Lock of inode. */
+  bool last_read;         /* Whether the last access is read or not. */
 };
 
 /* inode_disk calculation functions. */
@@ -502,6 +507,8 @@ inode_open (block_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
+  inode->last_read = false;
+  lock_init (&inode->inode_lock);
   filesys_block_read (inode->sector, &inode->data);
   return inode;
 }
@@ -708,7 +715,15 @@ inode_disk_read_at (struct inode_disk *inode_disk, void *buffer_, off_t size,
 off_t
 inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
 {
-  return inode_disk_read_at (&inode->data, buffer_, size, offset);
+  /* Yield process if last operation was a read. */
+  if (inode->last_read)
+    thread_yield ();
+
+  lock_acquire (&inode->inode_lock);
+  off_t read_bytes = inode_disk_read_at (&inode->data, buffer_, size, offset);
+  inode->last_read = true;
+  lock_release (&inode->inode_lock);
+  return read_bytes;
 }
 
 /* Writes SIZE bytes from BUFFER into direct disk inode INODE_DISK,
@@ -834,6 +849,13 @@ inode_write_at (struct inode *inode, const void *buffer, off_t size,
   if (inode->deny_write_cnt)
     return 0;
 
+  /* Yield thread if last operation was a read. */
+  if (!inode->last_read)
+    thread_yield ();
+
+  lock_acquire (&inode->inode_lock);
+
+  off_t write_count = 0;
   off_t new_length = offset + size;
 
   /* Grow depth if necessary. */
@@ -841,25 +863,30 @@ inode_write_at (struct inode *inode, const void *buffer, off_t size,
   if (inode->data.depth < depth)
     {
       if (!inode_grow_depth (inode, depth))
-        return 0;
+        goto done;
     }
 
   /* Extend length to offset, with zero fill, if necessary. */
   if (inode->data.length < offset)
     {
       if (!inode_grow_length (inode, offset, true))
-        return 0;
+        goto done;
     }
 
   /* Extend length to new_length, without zero fill, if necessary. */
   if (inode->data.length < new_length)
     {
       if (!inode_grow_length (inode, new_length, false))
-        return 0;
+        goto done;
     }
 
   /* Actually write. */
-  return inode_disk_write_at (&inode->data, buffer, size, offset);
+  write_count = inode_disk_write_at (&inode->data, buffer, size, offset);
+
+done:
+  inode->last_read = false;
+  lock_release (&inode->inode_lock);
+  return write_count;
 }
 
 /* Disables writes to INODE.

@@ -31,4 +31,6 @@ void filesys_block_read_bytes (block_sector_t sector, void *buffer, off_t ofs,
 void filesys_block_write_bytes (block_sector_t sector, const void *buffer,
                                 off_t ofs, uint32_t bytes);
 
+void filesys_cache_tick (void);
+
 #endif // FILESYS_CACHE_H

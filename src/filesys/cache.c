@@ -10,6 +10,9 @@
 /* Size of file system cache. */
 #define FILESYS_CACHE_SIZE 64
 
+/* Number of ticks to synchronize the cache. */
+#define FILESYS_CACHE_TICKS 10000
+
 /* A block cache. */
 struct block_cache_elem
 {
@@ -36,6 +39,9 @@ static bool cache_enabled = false;
 /* Lock for file system cache.
    Only acquire/release in non-static functions. */
 static struct lock filesys_cache_lock;
+
+/* Tick counter for file system cache. */
+static int64_t ticks;
 
 /* Initialize file system cache. */
 void
@@ -73,20 +79,25 @@ filesys_cache_write_back (struct block_cache_elem *elem)
 static struct block_cache_elem *
 filesys_cache_evict (void)
 {
-  for (int t = 0; t < FILESYS_CACHE_SIZE * 2; t++)
+  static int t = 0;
+
+  t %= FILESYS_CACHE_SIZE;
+  int end = t + FILESYS_CACHE_SIZE * 2;
+
+  for (; t < end; t++)
     {
       int i = t % FILESYS_CACHE_SIZE;
       struct block_cache_elem *elem = &filesys_cache[i];
 
-      /* If a block is not accessed, return it. */
+      /* If the block is not accessed, return it. */
       if (!elem->in_use)
         return elem;
 
-      /* If a block is pinned, skip it. */
+      /* If the block is pinned, skip it. */
       if (elem->pin)
         continue;
 
-      /* If a block is accessed, unset access and continue. */
+      /* If the block is accessed, unset access and continue. */
       if (elem->access)
         {
           elem->access = false;
@@ -147,6 +158,7 @@ filesys_sync_nolock (void)
       struct block_cache_elem *elem = &filesys_cache[i];
       if (elem->dirty)
         filesys_cache_write_back (elem);
+      elem->dirty = false;
     }
 }
 
@@ -312,4 +324,18 @@ filesys_cache_disable (void)
     }
 
   lock_release (&filesys_cache_lock);
+}
+
+void
+filesys_cache_tick (void)
+{
+  if (lock_held_by_any_thread (&filesys_cache_lock))
+    return;
+
+  ticks++;
+  if (ticks % FILESYS_CACHE_TICKS == 0)
+    {
+      if (cache_enabled)
+        filesys_sync_nolock ();
+    }
 }
